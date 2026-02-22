@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -10,6 +11,8 @@ from andhrimnir.api.websocket import router as ws_router
 from andhrimnir.config import Settings
 from andhrimnir.db import db_writer, init_db
 from andhrimnir.source.ble import BLETemperatureSource
+
+logging.basicConfig(level=logging.INFO)
 
 settings = Settings.from_env()
 source = BLETemperatureSource(settings)
