@@ -7,6 +7,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
     "bleak>=0.22",
+    "aiosqlite>=0.20",
 ]
 
 [project.scripts]

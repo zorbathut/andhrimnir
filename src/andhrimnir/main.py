@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from andhrimnir.api.routes import router as api_router
 from andhrimnir.api.websocket import router as ws_router
 from andhrimnir.config import Settings
+from andhrimnir.db import db_writer, init_db
 from andhrimnir.source.ble import BLETemperatureSource
 
 settings = Settings.from_env()
@@ -16,14 +17,23 @@ source = BLETemperatureSource(settings)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(source.start())
+    conn = await init_db(settings.db_path)
+    app.state.db = conn
+    writer_task = asyncio.create_task(db_writer(source, conn))
+    source_task = asyncio.create_task(source.start())
     yield
     await source.stop()
-    task.cancel()
+    writer_task.cancel()
+    source_task.cancel()
     try:
-        await task
+        await writer_task
     except asyncio.CancelledError:
         pass
+    try:
+        await source_task
+    except asyncio.CancelledError:
+        pass
+    await conn.close()
 
 
 app = FastAPI(title="Andhrimnir", lifespan=lifespan)

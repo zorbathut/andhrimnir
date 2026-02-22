@@ -10,6 +10,7 @@ class Settings:
     ble_reconnect_delay: float = 5.0
     host: str = "0.0.0.0"
     port: int = 8000
+    db_path: str = "andhrimnir.db"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -26,4 +27,6 @@ class Settings:
             kwargs["host"] = v
         if v := os.environ.get("ANDHRIMNIR_PORT"):
             kwargs["port"] = int(v)
+        if v := os.environ.get("ANDHRIMNIR_DB_PATH"):
+            kwargs["db_path"] = v
         return cls(**kwargs)
