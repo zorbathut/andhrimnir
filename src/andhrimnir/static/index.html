@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Andhrimnir</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 1.5rem;
+            background: #f5f5f5;
+            color: #333;
+        }
+        h1 { margin-bottom: 0.25rem; color: #d84315; }
+        .status {
+            font-size: 0.85rem;
+            color: #999;
+            margin-bottom: 1.5rem;
+        }
+        .status.connected { color: #2e7d32; }
+        .status.error { color: #c62828; }
+        .probe-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        .probe-card {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 1.25rem;
+            text-align: center;
+            transition: opacity 0.3s;
+        }
+        .probe-card.disconnected {
+            opacity: 0.35;
+        }
+        .probe-card .label {
+            font-size: 0.9rem;
+            color: #777;
+            margin-bottom: 0.5rem;
+        }
+        .probe-card .temp {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #d84315;
+        }
+        .probe-card.disconnected .temp {
+            color: #bbb;
+        }
+    </style>
+</head>
+<body>
+    <h1>Andhrimnir</h1>
+    <div class="status" id="status">Connecting...</div>
+    <div class="probe-grid" id="probes"></div>
+
+    <script>
+        const probesEl = document.getElementById("probes");
+        const statusEl = document.getElementById("status");
+
+        function cToF(c) {
+            return c * 9 / 5 + 32;
+        }
+
+        function renderProbes(data) {
+            probesEl.innerHTML = "";
+            for (const [num, tempC] of Object.entries(data.probes)) {
+                const card = document.createElement("div");
+                const connected = tempC !== null;
+                card.className = "probe-card" + (connected ? "" : " disconnected");
+
+                const display = connected ? cToF(tempC).toFixed(1) + "\u00b0F" : "\u2014";
+                card.innerHTML =
+                    '<div class="label">Probe ' + num + '</div>' +
+                    '<div class="temp">' + display + '</div>';
+                probesEl.appendChild(card);
+            }
+            statusEl.textContent = "Last update: " + new Date(data.timestamp).toLocaleTimeString();
+            statusEl.className = "status connected";
+        }
+
+        function connect() {
+            const proto = location.protocol === "https:" ? "wss:" : "ws:";
+            const ws = new WebSocket(proto + "//" + location.host + "/ws");
+
+            ws.onmessage = function(event) {
+                renderProbes(JSON.parse(event.data));
+            };
+
+            ws.onclose = function() {
+                statusEl.textContent = "Disconnected. Reconnecting...";
+                statusEl.className = "status error";
+                setTimeout(connect, 3000);
+            };
+
+            ws.onerror = function() { ws.close(); };
+        }
+
+        fetch("/api/temperatures")
+            .then(function(r) { return r.json(); })
+            .then(renderProbes)
+            .catch(function() {});
+
+        connect();
+    </script>
+</body>
+</html>
