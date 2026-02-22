@@ -51,6 +51,42 @@
         .probe-card.disconnected .temp {
             color: #bbb;
         }
+
+        .charts-section {
+            margin-top: 2rem;
+        }
+        .period-chooser {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.25rem;
+        }
+        .period-btn {
+            padding: 0.4rem 1.1rem;
+            border: 1px solid #ddd;
+            border-radius: 999px;
+            background: #fff;
+            color: #555;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+        .period-btn.active {
+            background: #d84315;
+            color: #fff;
+            border-color: #d84315;
+        }
+        .chart-row {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1rem;
+        }
+        .chart-row h3 {
+            font-size: 0.9rem;
+            color: #777;
+            margin-bottom: 0.5rem;
+        }
     </style>
 </head>
 <body>
@@ -58,6 +94,17 @@
     <div class="status" id="status">Connecting...</div>
     <div class="probe-grid" id="probes"></div>
 
+    <div class="charts-section">
+        <div class="period-chooser" id="period-chooser">
+            <button class="period-btn active" data-hours="1">1h</button>
+            <button class="period-btn" data-hours="4">4h</button>
+            <button class="period-btn" data-hours="12">12h</button>
+        </div>
+        <div id="chart-rows"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script>
         const probesEl = document.getElementById("probes");
         const statusEl = document.getElementById("status");
@@ -100,12 +147,139 @@
             ws.onerror = function() { ws.close(); };
         }
 
+        // --- Charts ---
+        var charts = {};       // probeNum -> Chart instance
+        var chartData = {};    // probeNum -> [{x: Date, y: tempF}, ...]
+        var selectedHours = 1;
+        var chartRowsEl = document.getElementById("chart-rows");
+
+        function sinceISO(hours) {
+            return new Date(Date.now() - hours * 3600000).toISOString();
+        }
+
+        function buildCharts(history) {
+            // history is array of {timestamp, probes: {1: val, ...}}, newest-first
+            // Destroy old charts
+            Object.values(charts).forEach(function(c) { c.destroy(); });
+            charts = {};
+            chartData = {};
+            chartRowsEl.innerHTML = "";
+
+            // Group by probe, filter probes that have at least one non-null reading
+            var probeNums = ["1","2","3","4","5","6"];
+            probeNums.forEach(function(num) {
+                var points = [];
+                for (var i = history.length - 1; i >= 0; i--) {
+                    var r = history[i];
+                    var v = r.probes[num];
+                    if (v !== null) {
+                        points.push({ x: new Date(r.timestamp), y: cToF(v) });
+                    }
+                }
+                if (points.length === 0) return;
+                // Insert nulls at gaps > 60s to break the line
+                var gapped = [points[0]];
+                for (var j = 1; j < points.length; j++) {
+                    if (points[j].x - points[j - 1].x > 60000) {
+                        gapped.push({ x: new Date(points[j - 1].x.getTime() + 1), y: null });
+                    }
+                    gapped.push(points[j]);
+                }
+                points = gapped;
+                chartData[num] = points;
+
+                var row = document.createElement("div");
+                row.className = "chart-row";
+                row.id = "chart-row-" + num;
+                row.innerHTML = '<h3>Probe ' + num + '</h3><canvas id="chart-' + num + '"></canvas>';
+                chartRowsEl.appendChild(row);
+
+                var ctx = document.getElementById("chart-" + num).getContext("2d");
+                charts[num] = new Chart(ctx, {
+                    type: "line",
+                    data: {
+                        datasets: [{
+                            data: points,
+                            borderColor: "#d84315",
+                            backgroundColor: "rgba(216,67,21,0.08)",
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            fill: true,
+                            tension: 0.25
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: {
+                                type: "time",
+                                time: { tooltipFormat: "HH:mm:ss" },
+                                ticks: { maxTicksLimit: 8 }
+                            },
+                            y: {
+                                title: { display: true, text: "\u00b0F" }
+                            }
+                        },
+                        animation: false
+                    }
+                });
+            });
+        }
+
+        function fetchHistory() {
+            var since = sinceISO(selectedHours);
+            fetch("/api/temperatures/history?since=" + encodeURIComponent(since) + "&limit=5000")
+                .then(function(r) { return r.json(); })
+                .then(buildCharts)
+                .catch(function() {});
+        }
+
+        // Period button clicks
+        document.getElementById("period-chooser").addEventListener("click", function(e) {
+            var btn = e.target.closest(".period-btn");
+            if (!btn) return;
+            document.querySelectorAll(".period-btn").forEach(function(b) { b.classList.remove("active"); });
+            btn.classList.add("active");
+            selectedHours = parseInt(btn.dataset.hours, 10);
+            fetchHistory();
+        });
+
+        // Append live reading to existing charts
+        function appendToCharts(data) {
+            var ts = new Date(data.timestamp);
+            var cutoff = new Date(Date.now() - selectedHours * 3600000);
+            Object.keys(charts).forEach(function(num) {
+                var v = data.probes[num];
+                if (v === null) return;
+                var pts = chartData[num];
+                // Insert null to break line if gap > 60s since last real point
+                var last = pts[pts.length - 1];
+                if (last && last.y !== null && ts - last.x > 60000) {
+                    pts.push({ x: new Date(last.x.getTime() + 1), y: null });
+                }
+                pts.push({ x: ts, y: cToF(v) });
+                // Trim old points outside window
+                while (pts.length > 0 && pts[0].x < cutoff) pts.shift();
+                charts[num].data.datasets[0].data = pts;
+                charts[num].update();
+            });
+        }
+
+        // Patch renderProbes to also feed charts
+        var _origRender = renderProbes;
+        renderProbes = function(data) {
+            _origRender(data);
+            appendToCharts(data);
+        };
+
         fetch("/api/temperatures")
             .then(function(r) { return r.json(); })
             .then(renderProbes)
             .catch(function() {});
 
         connect();
+        fetchHistory();
     </script>
 </body>
 </html>

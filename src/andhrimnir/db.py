@@ -55,13 +55,19 @@ async def db_writer(source: TemperatureSource, conn: aiosqlite.Connection) -> No
 
 
 async def get_history(
-    conn: aiosqlite.Connection, limit: int = 100, offset: int = 0
+    conn: aiosqlite.Connection, limit: int = 100, since: str | None = None
 ) -> list[dict]:
-    cursor = await conn.execute(
+    query = (
         "SELECT timestamp, probe1, probe2, probe3, probe4, probe5, probe6 "
-        "FROM readings ORDER BY id DESC LIMIT ? OFFSET ?",
-        (limit, offset),
+        "FROM readings"
     )
+    params: list = []
+    if since:
+        query += " WHERE timestamp >= ?"
+        params.append(since)
+    query += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    cursor = await conn.execute(query, params)
     rows = await cursor.fetchall()
     return [
         {

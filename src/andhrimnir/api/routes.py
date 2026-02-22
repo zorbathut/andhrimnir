@@ -13,7 +13,7 @@ async def get_temperatures(request: Request):
 
 @router.get("/temperatures/history")
 async def get_temperature_history(
-    request: Request, limit: int = 100, offset: int = 0
+    request: Request, limit: int = 5000, since: str | None = None
 ):
-    rows = await get_history(request.app.state.db, limit=limit, offset=offset)
+    rows = await get_history(request.app.state.db, limit=limit, since=since)
     return rows
