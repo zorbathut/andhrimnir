@@ -12,7 +12,7 @@ from andhrimnir.config import Settings
 from andhrimnir.db import db_writer, init_db
 from andhrimnir.source.ble import BLETemperatureSource
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
 
 settings = Settings.from_env()
 source = BLETemperatureSource(settings)
