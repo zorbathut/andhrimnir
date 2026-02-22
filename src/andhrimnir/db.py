@@ -4,7 +4,7 @@ import aiosqlite
 
 from andhrimnir.source.base import TemperatureSource
 
-CREATE_TABLE = """\
+CREATE_READINGS = """\
 CREATE TABLE IF NOT EXISTS readings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
@@ -17,6 +17,17 @@ CREATE TABLE IF NOT EXISTS readings (
 )
 """
 
+CREATE_PROBE_NAMES = """\
+CREATE TABLE IF NOT EXISTS probe_names (
+    probe_num INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+)
+"""
+
+SEED_PROBE_NAMES = """\
+INSERT OR IGNORE INTO probe_names (probe_num, name) VALUES (?, ?)
+"""
+
 INSERT = """\
 INSERT INTO readings (timestamp, probe1, probe2, probe3, probe4, probe5, probe6)
 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -25,7 +36,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 
 async def init_db(db_path: str) -> aiosqlite.Connection:
     conn = await aiosqlite.connect(db_path)
-    await conn.execute(CREATE_TABLE)
+    await conn.execute(CREATE_READINGS)
+    await conn.execute(CREATE_PROBE_NAMES)
+    for i in range(1, 7):
+        await conn.execute(SEED_PROBE_NAMES, (i, f"Probe {i}"))
     await conn.commit()
     return conn
 
@@ -83,3 +97,16 @@ async def get_history(
         }
         for row in rows
     ]
+
+
+async def get_probe_names(conn: aiosqlite.Connection) -> dict[str, str]:
+    cursor = await conn.execute("SELECT probe_num, name FROM probe_names ORDER BY probe_num")
+    rows = await cursor.fetchall()
+    return {str(row[0]): row[1] for row in rows}
+
+
+async def set_probe_name(conn: aiosqlite.Connection, probe_num: int, name: str) -> None:
+    await conn.execute(
+        "UPDATE probe_names SET name = ? WHERE probe_num = ?", (name, probe_num)
+    )
+    await conn.commit()

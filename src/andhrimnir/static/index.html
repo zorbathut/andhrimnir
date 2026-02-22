@@ -55,8 +55,20 @@
         .chart-row .chart-label {
             font-size: 0.9rem;
             color: #777;
-            width: 4.5rem;
+            width: 6rem;
             flex-shrink: 0;
+            cursor: pointer;
+        }
+        .chart-label-input {
+            font-size: 0.9rem;
+            font-family: inherit;
+            color: #333;
+            width: 5.5rem;
+            border: 1px solid #d84315;
+            border-radius: 4px;
+            padding: 0 0.2rem;
+            outline: none;
+            background: #fff;
         }
         .chart-row .chart-wrap {
             flex: 1;
@@ -130,6 +142,60 @@
             ws.onerror = function() { ws.close(); };
         }
 
+        // --- Probe names ---
+        var probeNames = {};   // "1" -> "Probe 1", etc.
+
+        function fetchProbeNames() {
+            return fetch("/api/probes/names")
+                .then(function(r) { return r.json(); })
+                .then(function(names) { probeNames = names; });
+        }
+
+        function applyProbeNames() {
+            document.querySelectorAll(".chart-label").forEach(function(el) {
+                var num = el.dataset.probe;
+                if (num && probeNames[num]) el.textContent = probeNames[num];
+            });
+        }
+
+        function makeEditable(labelEl) {
+            var num = labelEl.dataset.probe;
+            var current = labelEl.textContent;
+            var input = document.createElement("input");
+            input.type = "text";
+            input.className = "chart-label-input";
+            input.value = current;
+            labelEl.textContent = "";
+            labelEl.appendChild(input);
+            input.focus();
+            input.select();
+
+            function commit() {
+                var newName = input.value.trim() || current;
+                labelEl.textContent = newName;
+                probeNames[num] = newName;
+                fetch("/api/probes/names/" + num, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: newName })
+                }).catch(function() {});
+            }
+
+            var committed = false;
+            input.addEventListener("blur", function() {
+                if (!committed) { committed = true; commit(); }
+            });
+            input.addEventListener("keydown", function(e) {
+                if (e.key === "Enter") {
+                    committed = true;
+                    commit();
+                } else if (e.key === "Escape") {
+                    committed = true;
+                    labelEl.textContent = current;
+                }
+            });
+        }
+
         // --- Charts ---
         var charts = {};       // probeNum -> Chart instance
         var chartData = {};    // probeNum -> [{x: Date, y: tempF}, ...]
@@ -171,14 +237,19 @@
                 points = gapped;
                 chartData[num] = points;
 
+                var label = probeNames[num] || ("Probe " + num);
                 var row = document.createElement("div");
                 row.className = "chart-row";
                 row.id = "chart-row-" + num;
                 row.innerHTML =
-                    '<div class="chart-label">Probe ' + num + '</div>' +
+                    '<div class="chart-label" data-probe="' + num + '">' + label + '</div>' +
                     '<div class="chart-wrap"><canvas id="chart-' + num + '"></canvas></div>' +
                     '<div class="live-temp" id="live-temp-' + num + '"><div class="temp">\u2014</div></div>';
                 chartRowsEl.appendChild(row);
+                row.querySelector(".chart-label").addEventListener("click", function(e) {
+                    if (e.target.tagName === "INPUT") return;
+                    makeEditable(e.currentTarget);
+                });
 
                 var ctx = document.getElementById("chart-" + num).getContext("2d");
                 charts[num] = new Chart(ctx, {
@@ -267,7 +338,7 @@
             .catch(function() {});
 
         connect();
-        fetchHistory();
+        fetchProbeNames().then(fetchHistory).catch(fetchHistory);
     </script>
 </body>
 </html>
