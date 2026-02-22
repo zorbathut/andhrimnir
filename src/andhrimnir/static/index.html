@@ -61,7 +61,7 @@
         .chart-row .chart-wrap {
             flex: 1;
             min-width: 0;
-            height: 100px;
+            height: 150px;
         }
         .chart-row .live-temp {
             flex-shrink: 0;
@@ -197,6 +197,7 @@
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
+                        interaction: { mode: "nearest", axis: "x", intersect: false },
                         plugins: { legend: { display: false } },
                         scales: {
                             x: {
