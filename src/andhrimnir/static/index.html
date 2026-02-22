@@ -8,9 +8,7 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: system-ui, -apple-system, sans-serif;
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 1.5rem;
+            padding: 1.5rem 2rem;
             background: #f5f5f5;
             color: #333;
         }
@@ -22,39 +20,8 @@
         }
         .status.connected { color: #2e7d32; }
         .status.error { color: #c62828; }
-        .probe-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 1rem;
-        }
-        .probe-card {
-            background: #fff;
-            border: 1px solid #ddd;
-            border-radius: 10px;
-            padding: 1.25rem;
-            text-align: center;
-            transition: opacity 0.3s;
-        }
-        .probe-card.disconnected {
-            opacity: 0.35;
-        }
-        .probe-card .label {
-            font-size: 0.9rem;
-            color: #777;
-            margin-bottom: 0.5rem;
-        }
-        .probe-card .temp {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: #d84315;
-        }
-        .probe-card.disconnected .temp {
-            color: #bbb;
-        }
 
-        .charts-section {
-            margin-top: 2rem;
-        }
+        .charts-section {}
         .period-chooser {
             display: flex;
             gap: 0.5rem;
@@ -76,23 +43,44 @@
             border-color: #d84315;
         }
         .chart-row {
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
             background: #fff;
             border: 1px solid #ddd;
             border-radius: 10px;
-            padding: 1rem 1.25rem;
-            margin-bottom: 1rem;
+            padding: 0.75rem 1.25rem;
+            margin-bottom: 0.75rem;
         }
-        .chart-row h3 {
+        .chart-row .chart-label {
             font-size: 0.9rem;
             color: #777;
-            margin-bottom: 0.5rem;
+            width: 4.5rem;
+            flex-shrink: 0;
+        }
+        .chart-row .chart-wrap {
+            flex: 1;
+            min-width: 0;
+            height: 100px;
+        }
+        .chart-row .live-temp {
+            flex-shrink: 0;
+            width: 7.5rem;
+            text-align: right;
+        }
+        .chart-row .live-temp .temp {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #d84315;
+        }
+        .chart-row .live-temp.disconnected .temp {
+            color: #bbb;
         }
     </style>
 </head>
 <body>
     <h1>Andhrimnir</h1>
     <div class="status" id="status">Connecting...</div>
-    <div class="probe-grid" id="probes"></div>
 
     <div class="charts-section">
         <div class="period-chooser" id="period-chooser">
@@ -106,7 +94,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script>
-        const probesEl = document.getElementById("probes");
         const statusEl = document.getElementById("status");
 
         function cToF(c) {
@@ -114,17 +101,13 @@
         }
 
         function renderProbes(data) {
-            probesEl.innerHTML = "";
+            // Update live temps inside chart rows
             for (const [num, tempC] of Object.entries(data.probes)) {
-                const card = document.createElement("div");
-                const connected = tempC !== null;
-                card.className = "probe-card" + (connected ? "" : " disconnected");
-
-                const display = connected ? cToF(tempC).toFixed(1) + "\u00b0F" : "\u2014";
-                card.innerHTML =
-                    '<div class="label">Probe ' + num + '</div>' +
-                    '<div class="temp">' + display + '</div>';
-                probesEl.appendChild(card);
+                var el = document.getElementById("live-temp-" + num);
+                if (!el) continue;
+                var connected = tempC !== null;
+                el.className = "live-temp" + (connected ? "" : " disconnected");
+                el.querySelector(".temp").textContent = connected ? cToF(tempC).toFixed(1) + "\u00b0F" : "\u2014";
             }
             statusEl.textContent = "Last update: " + new Date(data.timestamp).toLocaleTimeString();
             statusEl.className = "status connected";
@@ -191,7 +174,10 @@
                 var row = document.createElement("div");
                 row.className = "chart-row";
                 row.id = "chart-row-" + num;
-                row.innerHTML = '<h3>Probe ' + num + '</h3><canvas id="chart-' + num + '"></canvas>';
+                row.innerHTML =
+                    '<div class="chart-label">Probe ' + num + '</div>' +
+                    '<div class="chart-wrap"><canvas id="chart-' + num + '"></canvas></div>' +
+                    '<div class="live-temp" id="live-temp-' + num + '"><div class="temp">\u2014</div></div>';
                 chartRowsEl.appendChild(row);
 
                 var ctx = document.getElementById("chart-" + num).getContext("2d");
@@ -210,6 +196,7 @@
                     },
                     options: {
                         responsive: true,
+                        maintainAspectRatio: false,
                         plugins: { legend: { display: false } },
                         scales: {
                             x: {
