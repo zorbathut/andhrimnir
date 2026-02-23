@@ -274,7 +274,21 @@
                             x: {
                                 type: "time",
                                 time: { tooltipFormat: "HH:mm:ss" },
-                                ticks: { maxTicksLimit: 8 }
+                                afterBuildTicks: function(scale) {
+                                    var range = scale.max - scale.min;
+                                    var minutes = range / 60000;
+                                    var nice = [1, 2, 5, 10, 15, 30, 60, 120, 360, 720, 1440];
+                                    var target = Math.max(2, Math.floor(scale.width / 100));
+                                    var raw = minutes / target;
+                                    var step = nice.find(function(n) { return n >= raw; }) || nice[nice.length - 1];
+                                    var stepMs = step * 60000;
+                                    var first = Math.ceil(scale.min / stepMs) * stepMs;
+                                    var ticks = [];
+                                    for (var t = first; t <= scale.max; t += stepMs) {
+                                        ticks.push({ value: t });
+                                    }
+                                    scale.ticks = ticks;
+                                }
                             },
                             y: {
                                 title: { display: true, text: "\u00b0F" }
