@@ -141,11 +141,49 @@
         .snooze-btn:hover {
             background: #ffebee;
         }
+
+        .stale-banner {
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            background: #c62828;
+            color: #fff;
+            padding: 0.6rem 1.25rem;
+            border-radius: 10px;
+            margin-bottom: 0.75rem;
+            font-size: 0.9rem;
+            animation: alert-pulse-banner 1s ease-in-out infinite;
+        }
+        .stale-banner.active { display: flex; }
+        .stale-banner .stale-silence {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.6rem;
+            border: 1px solid #fff;
+            border-radius: 4px;
+            background: transparent;
+            color: #fff;
+            cursor: pointer;
+            margin-left: 0.5rem;
+            flex-shrink: 0;
+        }
+        .stale-banner .stale-silence:hover { background: rgba(255,255,255,0.2); }
+        @keyframes alert-pulse-banner {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
     </style>
 </head>
 <body>
     <h1>Andhrimnir</h1>
     <div class="status" id="status">Connecting...</div>
+
+    <div class="stale-banner" id="stale-banner">
+        <span id="stale-text">No sensor data received</span>
+        <span>
+            <button class="stale-silence" data-minutes="1">Silent 1m</button>
+            <button class="stale-silence" data-minutes="5">Silent 5m</button>
+        </span>
+    </div>
 
     <div class="charts-section">
         <div class="period-chooser" id="period-chooser">
@@ -183,6 +221,7 @@
             const ws = new WebSocket(proto + "//" + location.host + "/ws");
 
             ws.onmessage = function(event) {
+                lastDataTime = Date.now();
                 renderProbes(JSON.parse(event.data));
             };
 
@@ -194,6 +233,33 @@
 
             ws.onerror = function() { ws.close(); };
         }
+
+        // --- Stale data alert ---
+        var lastDataTime = Date.now();
+        var staleSnoozedUntil = 0;
+        var STALE_TIMEOUT_MS = 60000;
+        var staleBannerEl = document.getElementById("stale-banner");
+        var staleTextEl = document.getElementById("stale-text");
+
+        setInterval(function() {
+            var gap = Date.now() - lastDataTime;
+            var snoozed = staleSnoozedUntil && Date.now() < staleSnoozedUntil;
+            if (gap >= STALE_TIMEOUT_MS && !snoozed) {
+                var secs = Math.round(gap / 1000);
+                staleTextEl.textContent = "No sensor data for " + secs + "s";
+                staleBannerEl.classList.add("active");
+                beep();
+            } else {
+                staleBannerEl.classList.remove("active");
+            }
+        }, 2000);
+
+        document.addEventListener("click", function(e) {
+            if (!e.target.classList.contains("stale-silence")) return;
+            var minutes = parseInt(e.target.dataset.minutes, 10);
+            staleSnoozedUntil = Date.now() + minutes * 60000;
+            staleBannerEl.classList.remove("active");
+        });
 
         // --- Probe names ---
         var probeNames = {};   // "1" -> "Probe 1", etc.
