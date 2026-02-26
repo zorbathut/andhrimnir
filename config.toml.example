@@ -1,0 +1,17 @@
+[ble]
+address = "XX:XX:XX:XX:XX:XX"
+service_uuid = "0000ffb0-0000-1000-8000-00805f9b34fb"
+char_uuid = "0000ffb2-0000-1000-8000-00805f9b34fb"
+reconnect_delay = 5.0
+
+[esp]
+host = "192.168.1.100"
+port = 6053
+password = ""
+noise_psk = ""
+reconnect_delay = 5.0
+
+[server]
+host = "0.0.0.0"
+port = 8000
+db_path = "andhrimnir.db"
