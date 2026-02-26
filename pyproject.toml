@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn[standard]>=0.34",
     "bleak>=0.22",
     "aiosqlite>=0.20",
+    "aioesphomeapi>=24.0",
 ]
 
 [project.scripts]
