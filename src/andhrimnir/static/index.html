@@ -474,6 +474,55 @@
         }
 
         // --- Charts ---
+        var syncingTooltips = false;
+        Chart.register({
+            id: "syncTooltips",
+            afterEvent: function(chart, args) {
+                if (syncingTooltips) return;
+                var evt = args.event;
+                if (evt.type === "mouseout") {
+                    syncingTooltips = true;
+                    Object.values(charts).forEach(function(c) {
+                        if (c !== chart) {
+                            c.setActiveElements([]);
+                            c.tooltip.setActiveElements([], {x: 0, y: 0});
+                            c.update("none");
+                        }
+                    });
+                    syncingTooltips = false;
+                    return;
+                }
+                if (evt.type !== "mousemove") return;
+                var active = chart.getActiveElements();
+                if (!active.length) return;
+                var activePoint = active[0];
+                var dataX = chart.data.datasets[activePoint.datasetIndex].data[activePoint.index].x;
+                var timestamp = dataX instanceof Date ? dataX.getTime() : dataX;
+                syncingTooltips = true;
+                Object.values(charts).forEach(function(c) {
+                    if (c === chart) return;
+                    var ds = c.data.datasets[0].data;
+                    var bestIdx = -1, bestDist = Infinity;
+                    for (var i = 0; i < ds.length; i++) {
+                        if (ds[i].y === null) continue;
+                        var t = ds[i].x instanceof Date ? ds[i].x.getTime() : ds[i].x;
+                        var d = Math.abs(t - timestamp);
+                        if (d < bestDist) { bestDist = d; bestIdx = i; }
+                    }
+                    if (bestIdx >= 0 && bestDist < 30000) {
+                        var pt = c.getDatasetMeta(0).data[bestIdx];
+                        c.setActiveElements([{datasetIndex: 0, index: bestIdx}]);
+                        c.tooltip.setActiveElements([{datasetIndex: 0, index: bestIdx}], {x: pt.x, y: pt.y});
+                    } else {
+                        c.setActiveElements([]);
+                        c.tooltip.setActiveElements([], {x: 0, y: 0});
+                    }
+                    c.update("none");
+                });
+                syncingTooltips = false;
+            }
+        });
+
         var charts = {};       // probeNum -> Chart instance
         var chartData = {};    // probeNum -> [{x: Date, y: tempF}, ...]
         var selectedHours = 1;
