@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from andhrimnir.db import get_history, get_probe_names, set_probe_name
+from andhrimnir.db import get_alert_thresholds, get_history, get_probe_names, set_alert_threshold, set_probe_name
 
 router = APIRouter(prefix="/api")
 
@@ -33,3 +33,19 @@ class ProbeNameBody(BaseModel):
 async def put_name(request: Request, probe_num: int, body: ProbeNameBody):
     await set_probe_name(request.app.state.db, probe_num, body.name)
     return await get_probe_names(request.app.state.db)
+
+
+@router.get("/probes/thresholds")
+async def get_thresholds(request: Request):
+    return await get_alert_thresholds(request.app.state.db)
+
+
+class ThresholdBody(BaseModel):
+    low: float | None = None
+    high: float | None = None
+
+
+@router.put("/probes/thresholds/{probe_num}")
+async def put_threshold(request: Request, probe_num: int, body: ThresholdBody):
+    await set_alert_threshold(request.app.state.db, probe_num, body.low, body.high)
+    return await get_alert_thresholds(request.app.state.db)

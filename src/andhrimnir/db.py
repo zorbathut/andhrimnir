@@ -121,3 +121,21 @@ async def set_probe_name(conn: aiosqlite.Connection, probe_num: int, name: str) 
         "UPDATE probe_names SET name = ? WHERE probe_num = ?", (name, probe_num)
     )
     await conn.commit()
+
+
+async def get_alert_thresholds(conn: aiosqlite.Connection) -> dict[str, dict]:
+    cursor = await conn.execute(
+        "SELECT probe_num, low_temp_f, high_temp_f FROM alert_thresholds ORDER BY probe_num"
+    )
+    rows = await cursor.fetchall()
+    return {str(row[0]): {"low": row[1], "high": row[2]} for row in rows}
+
+
+async def set_alert_threshold(
+    conn: aiosqlite.Connection, probe_num: int, low: float | None, high: float | None
+) -> None:
+    await conn.execute(
+        "UPDATE alert_thresholds SET low_temp_f = ?, high_temp_f = ? WHERE probe_num = ?",
+        (low, high, probe_num),
+    )
+    await conn.commit()

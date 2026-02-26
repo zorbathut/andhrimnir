@@ -88,6 +88,59 @@
         .chart-row .live-temp.disconnected .temp {
             color: #bbb;
         }
+
+        .chart-row.alerting {
+            border-color: #c62828;
+            animation: alert-pulse 1s ease-in-out infinite;
+        }
+        @keyframes alert-pulse {
+            0%, 100% { background: #fff; }
+            50% { background: #ffebee; }
+        }
+
+        .threshold-inputs {
+            display: flex;
+            gap: 0.35rem;
+            justify-content: flex-end;
+            margin-top: 0.35rem;
+        }
+        .threshold-input {
+            width: 3.5rem;
+            font-size: 0.75rem;
+            font-family: inherit;
+            text-align: center;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 0.15rem 0.2rem;
+            color: #555;
+            background: #fafafa;
+        }
+        .threshold-input:focus {
+            border-color: #d84315;
+            outline: none;
+        }
+
+        .snooze-buttons {
+            display: none;
+            gap: 0.25rem;
+            justify-content: flex-end;
+            margin-top: 0.25rem;
+        }
+        .chart-row.alerting .snooze-buttons {
+            display: flex;
+        }
+        .snooze-btn {
+            font-size: 0.65rem;
+            padding: 0.15rem 0.4rem;
+            border: 1px solid #c62828;
+            border-radius: 4px;
+            background: #fff;
+            color: #c62828;
+            cursor: pointer;
+        }
+        .snooze-btn:hover {
+            background: #ffebee;
+        }
     </style>
 </head>
 <body>
@@ -196,6 +249,93 @@
             });
         }
 
+        // --- Alert thresholds ---
+        var alertThresholds = {};  // "1" -> {low: null, high: 200}, ...
+        var snoozedUntil = {};     // "1" -> timestamp ms
+
+        function fetchThresholds() {
+            return fetch("/api/probes/thresholds")
+                .then(function(r) { return r.json(); })
+                .then(function(t) { alertThresholds = t; });
+        }
+
+        function applyThresholds() {
+            document.querySelectorAll(".threshold-input").forEach(function(input) {
+                var num = input.dataset.probe;
+                var bound = input.dataset.bound;
+                var t = alertThresholds[num];
+                if (t && t[bound] !== null && t[bound] !== undefined) {
+                    input.value = t[bound];
+                } else {
+                    input.value = "";
+                }
+            });
+        }
+
+        document.addEventListener("change", function(e) {
+            if (!e.target.classList.contains("threshold-input")) return;
+            var num = e.target.dataset.probe;
+            var bound = e.target.dataset.bound;
+            var val = e.target.value.trim();
+            var parsed = val === "" ? null : parseFloat(val);
+            if (val !== "" && isNaN(parsed)) return;
+            if (!alertThresholds[num]) alertThresholds[num] = {low: null, high: null};
+            alertThresholds[num][bound] = parsed;
+            fetch("/api/probes/thresholds/" + num, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(alertThresholds[num])
+            }).catch(function() {});
+        });
+
+        document.addEventListener("click", function(e) {
+            if (!e.target.classList.contains("snooze-btn")) return;
+            var num = e.target.dataset.probe;
+            var minutes = parseInt(e.target.dataset.minutes, 10);
+            snoozedUntil[num] = Date.now() + minutes * 60000;
+            var row = document.getElementById("chart-row-" + num);
+            if (row) row.classList.remove("alerting");
+        });
+
+        var audioCtx = null;
+        function beep() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            var osc = audioCtx.createOscillator();
+            var gain = audioCtx.createGain();
+            osc.type = "square";
+            osc.frequency.value = 880;
+            gain.gain.value = 0.15;
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.2);
+        }
+
+        function checkAlerts(data) {
+            var now = Date.now();
+            var anyAlerting = false;
+            for (var num in data.probes) {
+                var tempC = data.probes[num];
+                var row = document.getElementById("chart-row-" + num);
+                if (!row) continue;
+                var t = alertThresholds[num];
+                if (!t || tempC === null) {
+                    row.classList.remove("alerting");
+                    continue;
+                }
+                var tempF = cToF(tempC);
+                var tripped = (t.low !== null && tempF < t.low) || (t.high !== null && tempF > t.high);
+                var snoozed = snoozedUntil[num] && now < snoozedUntil[num];
+                if (tripped && !snoozed) {
+                    row.classList.add("alerting");
+                    anyAlerting = true;
+                } else {
+                    row.classList.remove("alerting");
+                }
+            }
+            if (anyAlerting) beep();
+        }
+
         // --- Charts ---
         var charts = {};       // probeNum -> Chart instance
         var chartData = {};    // probeNum -> [{x: Date, y: tempF}, ...]
@@ -244,7 +384,17 @@
                 row.innerHTML =
                     '<div class="chart-label" data-probe="' + num + '">' + label + '</div>' +
                     '<div class="chart-wrap"><canvas id="chart-' + num + '"></canvas></div>' +
-                    '<div class="live-temp" id="live-temp-' + num + '"><div class="temp">\u2014</div></div>';
+                    '<div class="live-temp" id="live-temp-' + num + '">' +
+                        '<div class="temp">\u2014</div>' +
+                        '<div class="threshold-inputs">' +
+                            '<input class="threshold-input" data-probe="' + num + '" data-bound="low" placeholder="Lo \u00b0F">' +
+                            '<input class="threshold-input" data-probe="' + num + '" data-bound="high" placeholder="Hi \u00b0F">' +
+                        '</div>' +
+                        '<div class="snooze-buttons">' +
+                            '<button class="snooze-btn" data-probe="' + num + '" data-minutes="1">Silent 1m</button>' +
+                            '<button class="snooze-btn" data-probe="' + num + '" data-minutes="5">Silent 5m</button>' +
+                        '</div>' +
+                    '</div>';
                 chartRowsEl.appendChild(row);
                 row.querySelector(".chart-label").addEventListener("click", function(e) {
                     if (e.target.tagName === "INPUT") return;
@@ -298,6 +448,7 @@
                     }
                 });
             });
+            applyThresholds();
         }
 
         function fetchHistory() {
@@ -344,6 +495,7 @@
         renderProbes = function(data) {
             _origRender(data);
             appendToCharts(data);
+            checkAlerts(data);
         };
 
         fetch("/api/temperatures")
@@ -352,7 +504,7 @@
             .catch(function() {});
 
         connect();
-        fetchProbeNames().then(fetchHistory).catch(fetchHistory);
+        Promise.all([fetchProbeNames(), fetchThresholds()]).then(fetchHistory).catch(fetchHistory);
     </script>
 </body>
 </html>
