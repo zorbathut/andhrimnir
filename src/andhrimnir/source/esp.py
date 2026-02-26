@@ -36,7 +36,6 @@ class ESPTemperatureSource(BaseTemperatureSource):
             port=self._port,
             password=self._password,
             noise_psk=self._noise_psk,
-            keepalive=15.0,
         )
 
     async def probe(self) -> bool:
