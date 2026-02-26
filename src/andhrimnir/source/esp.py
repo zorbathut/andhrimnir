@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import time
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -35,6 +36,7 @@ class ESPTemperatureSource(BaseTemperatureSource):
             port=self._port,
             password=self._password,
             noise_psk=self._noise_psk,
+            keepalive=15.0,
         )
 
     async def probe(self) -> bool:
@@ -54,6 +56,7 @@ class ESPTemperatureSource(BaseTemperatureSource):
                 logger.info("Connecting to ESP gateway %s:%s ...", self._host, self._port)
                 await client.connect(on_stop=self._on_disconnect, login=True)
                 self._connected.set()
+                self._connect_time = time.monotonic()
                 logger.info("Connected to ESP gateway")
 
                 entities, _ = await client.list_entities_services()
@@ -78,7 +81,8 @@ class ESPTemperatureSource(BaseTemperatureSource):
                     await asyncio.sleep(1.0)
 
             except Exception as exc:
-                logger.warning("ESP connection error: %s", exc)
+                uptime = time.monotonic() - getattr(self, '_connect_time', time.monotonic())
+                logger.warning("ESP connection error after %.1fs: %s: %s", uptime, type(exc).__name__, exc)
             finally:
                 self._connected.clear()
                 if self._flush_handle is not None:
@@ -100,7 +104,8 @@ class ESPTemperatureSource(BaseTemperatureSource):
                     pass
 
     async def _on_disconnect(self, expected: bool) -> None:
-        logger.warning("ESP gateway disconnected (expected=%s)", expected)
+        uptime = time.monotonic() - getattr(self, '_connect_time', time.monotonic())
+        logger.warning("ESP gateway disconnected (expected=%s, uptime=%.1fs)", expected, uptime)
         self._connected.clear()
 
     def _on_state(self, state: SensorState) -> None:
