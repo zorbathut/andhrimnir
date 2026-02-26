@@ -64,6 +64,15 @@ async def db_writer(source: TemperatureSource, conn: aiosqlite.Connection) -> No
                 ),
             )
             await conn.commit()
+            temps = " | ".join(
+                f"P{i}: {t:.1f}°C" if t is not None else f"P{i}: --"
+                for i, t in enumerate(
+                    (reading.probe1, reading.probe2, reading.probe3,
+                     reading.probe4, reading.probe5, reading.probe6),
+                    1,
+                )
+            )
+            log.info(temps)
     except asyncio.CancelledError:
         pass
     finally:
