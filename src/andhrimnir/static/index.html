@@ -126,7 +126,8 @@
             justify-content: flex-end;
             margin-top: 0.25rem;
         }
-        .chart-row.alerting .snooze-buttons {
+        .chart-row.alerting .snooze-buttons,
+        .chart-row.snoozed .snooze-buttons {
             display: flex;
         }
         .snooze-btn {
@@ -141,6 +142,19 @@
         .snooze-btn:hover {
             background: #ffebee;
         }
+        .chart-row.snoozed .snooze-btn { display: none; }
+        .snooze-countdown {
+            display: none;
+            font-size: 0.65rem;
+            padding: 0.15rem 0.4rem;
+            border: 1px solid #999;
+            border-radius: 4px;
+            background: #fafafa;
+            color: #777;
+            cursor: pointer;
+        }
+        .snooze-countdown:hover { background: #eee; }
+        .chart-row.snoozed .snooze-countdown { display: inline-block; }
 
         .stale-banner {
             display: none;
@@ -167,6 +181,25 @@
             flex-shrink: 0;
         }
         .stale-banner .stale-silence:hover { background: rgba(255,255,255,0.2); }
+        .stale-banner.snoozed {
+            background: #999;
+            animation: none;
+        }
+        .stale-banner.snoozed .stale-silence { display: none; }
+        .stale-countdown {
+            display: none;
+            font-size: 0.75rem;
+            padding: 0.25rem 0.6rem;
+            border: 1px solid #fff;
+            border-radius: 4px;
+            background: transparent;
+            color: #fff;
+            cursor: pointer;
+            margin-left: 0.5rem;
+            flex-shrink: 0;
+        }
+        .stale-countdown:hover { background: rgba(255,255,255,0.2); }
+        .stale-banner.snoozed .stale-countdown { display: inline-block; }
         @keyframes alert-pulse-banner {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.7; }
@@ -182,6 +215,7 @@
         <span>
             <button class="stale-silence" data-minutes="1">Silent 1m</button>
             <button class="stale-silence" data-minutes="5">Silent 5m</button>
+            <span class="stale-countdown" id="stale-countdown"></span>
         </span>
     </div>
 
@@ -234,6 +268,13 @@
             ws.onerror = function() { ws.close(); };
         }
 
+        function formatCountdown(ms) {
+            var secs = Math.max(0, Math.ceil(ms / 1000));
+            var m = Math.floor(secs / 60);
+            var s = secs % 60;
+            return m + ":" + (s < 10 ? "0" : "") + s;
+        }
+
         // --- Stale data alert ---
         var lastDataTime = Date.now();
         var staleSnoozedUntil = 0;
@@ -241,24 +282,38 @@
         var staleBannerEl = document.getElementById("stale-banner");
         var staleTextEl = document.getElementById("stale-text");
 
+        var staleCountdownEl = document.getElementById("stale-countdown");
+
         setInterval(function() {
-            var gap = Date.now() - lastDataTime;
-            var snoozed = staleSnoozedUntil && Date.now() < staleSnoozedUntil;
-            if (gap >= STALE_TIMEOUT_MS && !snoozed) {
-                var secs = Math.round(gap / 1000);
-                staleTextEl.textContent = "No sensor data for " + secs + "s";
+            var now = Date.now();
+            var gap = now - lastDataTime;
+            var snoozed = staleSnoozedUntil && now < staleSnoozedUntil;
+            if (gap >= STALE_TIMEOUT_MS) {
                 staleBannerEl.classList.add("active");
-                beep();
+                if (snoozed) {
+                    staleBannerEl.classList.add("snoozed");
+                    staleTextEl.textContent = "Stale data alert silenced";
+                    staleCountdownEl.textContent = formatCountdown(staleSnoozedUntil - now) + " \u2715";
+                } else {
+                    staleBannerEl.classList.remove("snoozed");
+                    var secs = Math.round(gap / 1000);
+                    staleTextEl.textContent = "No sensor data for " + secs + "s";
+                    beep();
+                }
             } else {
-                staleBannerEl.classList.remove("active");
+                staleBannerEl.classList.remove("active", "snoozed");
+                staleSnoozedUntil = 0;
             }
         }, 2000);
 
         document.addEventListener("click", function(e) {
-            if (!e.target.classList.contains("stale-silence")) return;
-            var minutes = parseInt(e.target.dataset.minutes, 10);
-            staleSnoozedUntil = Date.now() + minutes * 60000;
-            staleBannerEl.classList.remove("active");
+            if (e.target.classList.contains("stale-silence")) {
+                var minutes = parseInt(e.target.dataset.minutes, 10);
+                staleSnoozedUntil = Date.now() + minutes * 60000;
+            } else if (e.target.id === "stale-countdown") {
+                staleSnoozedUntil = 0;
+                staleBannerEl.classList.remove("snoozed");
+            }
         });
 
         // --- Probe names ---
@@ -355,12 +410,21 @@
         });
 
         document.addEventListener("click", function(e) {
-            if (!e.target.classList.contains("snooze-btn")) return;
-            var num = e.target.dataset.probe;
-            var minutes = parseInt(e.target.dataset.minutes, 10);
-            snoozedUntil[num] = Date.now() + minutes * 60000;
-            var row = document.getElementById("chart-row-" + num);
-            if (row) row.classList.remove("alerting");
+            if (e.target.classList.contains("snooze-btn")) {
+                var num = e.target.dataset.probe;
+                var minutes = parseInt(e.target.dataset.minutes, 10);
+                snoozedUntil[num] = Date.now() + minutes * 60000;
+                var row = document.getElementById("chart-row-" + num);
+                if (row) {
+                    row.classList.remove("alerting");
+                    row.classList.add("snoozed");
+                }
+            } else if (e.target.classList.contains("snooze-countdown")) {
+                var num = e.target.dataset.probe;
+                snoozedUntil[num] = 0;
+                var row = document.getElementById("chart-row-" + num);
+                if (row) row.classList.remove("snoozed");
+            }
         });
 
         var audioCtx = null;
@@ -386,17 +450,24 @@
                 if (!row) continue;
                 var t = alertThresholds[num];
                 if (!t || tempC === null) {
-                    row.classList.remove("alerting");
+                    row.classList.remove("alerting", "snoozed");
                     continue;
                 }
                 var tempF = cToF(tempC);
                 var tripped = (t.low !== null && tempF < t.low) || (t.high !== null && tempF > t.high);
                 var snoozed = snoozedUntil[num] && now < snoozedUntil[num];
-                if (tripped && !snoozed) {
+                if (tripped && snoozed) {
+                    row.classList.remove("alerting");
+                    row.classList.add("snoozed");
+                    var cd = row.querySelector(".snooze-countdown");
+                    if (cd) cd.textContent = formatCountdown(snoozedUntil[num] - now) + " \u2715";
+                } else if (tripped) {
                     row.classList.add("alerting");
+                    row.classList.remove("snoozed");
                     anyAlerting = true;
                 } else {
-                    row.classList.remove("alerting");
+                    row.classList.remove("alerting", "snoozed");
+                    snoozedUntil[num] = 0;
                 }
             }
             if (anyAlerting) beep();
@@ -459,6 +530,7 @@
                         '<div class="snooze-buttons">' +
                             '<button class="snooze-btn" data-probe="' + num + '" data-minutes="1">Silent 1m</button>' +
                             '<button class="snooze-btn" data-probe="' + num + '" data-minutes="5">Silent 5m</button>' +
+                            '<span class="snooze-countdown" data-probe="' + num + '"></span>' +
                         '</div>' +
                     '</div>';
                 chartRowsEl.appendChild(row);
