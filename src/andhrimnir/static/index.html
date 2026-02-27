@@ -456,7 +456,7 @@
                 var tempF = cToF(tempC);
                 var tripped = (t.low !== null && tempF < t.low) || (t.high !== null && tempF > t.high);
                 var snoozed = snoozedUntil[num] && now < snoozedUntil[num];
-                if (tripped && snoozed) {
+                if (snoozed) {
                     row.classList.remove("alerting");
                     row.classList.add("snoozed");
                     var cd = row.querySelector(".snooze-countdown");
@@ -467,7 +467,6 @@
                     anyAlerting = true;
                 } else {
                     row.classList.remove("alerting", "snoozed");
-                    snoozedUntil[num] = 0;
                 }
             }
             if (anyAlerting) beep();
