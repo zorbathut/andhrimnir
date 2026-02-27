@@ -639,7 +639,8 @@
 
         function fetchHistory() {
             var since = sinceISO(selectedHours);
-            fetch("/api/temperatures/history?since=" + encodeURIComponent(since) + "&limit=5000")
+            var limit = selectedHours * 2000;
+            fetch("/api/temperatures/history?since=" + encodeURIComponent(since) + "&limit=" + limit)
                 .then(function(r) { return r.json(); })
                 .then(buildCharts)
                 .catch(function() {});
