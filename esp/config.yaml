@@ -1,0 +1,129 @@
+esphome:
+  name: esp32-bluetooth-proxy-a034a0
+
+esp32:
+  board: m5stack-atom
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: REDACTED
+  password: REDACTED
+
+api:
+  reboot_timeout: 0s
+  max_send_queue: 32
+
+logger:
+  level: DEBUG
+
+ota:
+    platform: esphome
+
+esp32_ble_tracker:
+  scan_parameters:
+    interval: 1100ms
+    window: 1100ms
+    active: true
+
+esp32_ble:
+  max_connections: 4
+
+bluetooth_proxy:
+  active: true
+
+ble_client:
+  - mac_address: 02:CA:6A:21:A7:16
+    id: grill_bt5
+    auto_connect: true
+
+sensor:
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: grill_bt5
+    name: "BBQ Probe 1"
+    service_uuid: '0000ffb0-0000-1000-8000-00805f9b34fb'
+    characteristic_uuid: '0000ffb2-0000-1000-8000-00805f9b34fb'
+    notify: true
+    device_class: "temperature"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    lambda: |-
+      uint16_t temp = (uint16_t)x[2]*256 + x[3];
+      if (temp == 0xFFFF) return NAN;
+      return (float)temp / 10.0f;
+
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: grill_bt5
+    name: "BBQ Probe 2"
+    service_uuid: '0000ffb0-0000-1000-8000-00805f9b34fb'
+    characteristic_uuid: '0000ffb2-0000-1000-8000-00805f9b34fb'
+    notify: true
+    device_class: "temperature"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    lambda: |-
+      uint16_t temp = (uint16_t)x[4]*256 + x[5];
+      if (temp == 0xFFFF) return NAN;
+      return (float)temp / 10.0f;
+
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: grill_bt5
+    name: "BBQ Probe 3"
+    service_uuid: '0000ffb0-0000-1000-8000-00805f9b34fb'
+    characteristic_uuid: '0000ffb2-0000-1000-8000-00805f9b34fb'
+    notify: true
+    device_class: "temperature"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    lambda: |-
+      uint16_t temp = (uint16_t)x[6]*256 + x[7];
+      if (temp == 0xFFFF) return NAN;
+      return (float)temp / 10.0f;
+
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: grill_bt5
+    name: "BBQ Probe 4"
+    service_uuid: '0000ffb0-0000-1000-8000-00805f9b34fb'
+    characteristic_uuid: '0000ffb2-0000-1000-8000-00805f9b34fb'
+    notify: true
+    device_class: "temperature"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    lambda: |-
+      uint16_t temp = (uint16_t)x[8]*256 + x[9];
+      if (temp == 0xFFFF) return NAN;
+      return (float)temp / 10.0f;
+
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: grill_bt5
+    name: "BBQ Probe 5"
+    service_uuid: '0000ffb0-0000-1000-8000-00805f9b34fb'
+    characteristic_uuid: '0000ffb2-0000-1000-8000-00805f9b34fb'
+    notify: true
+    device_class: "temperature"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    lambda: |-
+      uint16_t temp = (uint16_t)x[10]*256 + x[11];
+      if (temp == 0xFFFF) return NAN;
+      return (float)temp / 10.0f;
+
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: grill_bt5
+    name: "BBQ Probe 6"
+    service_uuid: '0000ffb0-0000-1000-8000-00805f9b34fb'
+    characteristic_uuid: '0000ffb2-0000-1000-8000-00805f9b34fb'
+    notify: true
+    device_class: "temperature"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    lambda: |-
+      uint16_t temp = (uint16_t)x[12]*256 + x[13];
+      if (temp == 0xFFFF) return NAN;
+      return (float)temp / 10.0f;
