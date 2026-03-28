@@ -12,7 +12,6 @@ from andhrimnir.config import Settings
 from andhrimnir.db import db_writer, init_db
 from andhrimnir.source.base import TemperatureSource
 from andhrimnir.source.ble import BLETemperatureSource
-from andhrimnir.source.esp import ESPTemperatureSource
 from andhrimnir.source.esp_proxy import ESPProxyTemperatureSource
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
@@ -27,8 +26,6 @@ async def _detect_source(settings: Settings) -> TemperatureSource:
 
     if settings.esp_host and settings.ble_address:
         sources.append(("ESP proxy", ESPProxyTemperatureSource(settings)))
-    if settings.esp_host:
-        sources.append(("ESP gateway", ESPTemperatureSource(settings)))
     if settings.ble_address:
         sources.append(("BLE direct", BLETemperatureSource(settings)))
 
