@@ -13,6 +13,7 @@ from andhrimnir.db import db_writer, init_db
 from andhrimnir.source.base import TemperatureSource
 from andhrimnir.source.ble import BLETemperatureSource
 from andhrimnir.source.esp import ESPTemperatureSource
+from andhrimnir.source.esp_proxy import ESPProxyTemperatureSource
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
 logger = logging.getLogger(__name__)
@@ -21,44 +22,42 @@ settings = Settings.from_env()
 
 
 async def _detect_source(settings: Settings) -> TemperatureSource:
-    """Try ESP and BLE in parallel, return whichever connects first."""
-    esp = ESPTemperatureSource(settings)
-    ble = BLETemperatureSource(settings)
+    """Try ESP proxy, ESP gateway, and direct BLE — return whichever connects first."""
+    sources: list[tuple[str, TemperatureSource]] = []
 
-    esp_task = asyncio.create_task(esp.probe())
-    ble_task = asyncio.create_task(ble.probe())
+    if settings.esp_host and settings.ble_address:
+        sources.append(("ESP proxy", ESPProxyTemperatureSource(settings)))
+    if settings.esp_host:
+        sources.append(("ESP gateway", ESPTemperatureSource(settings)))
+    if settings.ble_address:
+        sources.append(("BLE direct", BLETemperatureSource(settings)))
 
-    done, pending = await asyncio.wait(
-        [esp_task, ble_task], return_when=asyncio.FIRST_COMPLETED
-    )
+    if not sources:
+        logger.warning("No source configured, defaulting to BLE")
+        return BLETemperatureSource(settings)
 
-    # Check if the first to finish succeeded
-    for task in done:
-        if task.exception() is None and task.result():
-            for p in pending:
-                p.cancel()
-            if task is esp_task:
-                logger.info("ESP gateway detected, using ESP source")
-                return esp
-            else:
-                logger.info("BLE device detected, using BLE source")
-                return ble
+    tasks = {
+        asyncio.create_task(source.probe()): (name, source)
+        for name, source in sources
+    }
+    remaining = set(tasks)
 
-    # First to finish failed — wait for the other
-    if pending:
-        done2, _ = await asyncio.wait(pending)
-        for task in done2:
+    while remaining:
+        done, remaining = await asyncio.wait(
+            remaining, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in done:
+            name, source = tasks[task]
             if task.exception() is None and task.result():
-                if task is esp_task:
-                    logger.info("ESP gateway detected, using ESP source")
-                    return esp
-                else:
-                    logger.info("BLE device detected, using BLE source")
-                    return ble
+                for p in remaining:
+                    p.cancel()
+                logger.info("%s detected, using %s source", name, name)
+                return source
 
-    # Both failed, default to BLE (it has its own reconnect loop)
-    logger.warning("Neither source detected, defaulting to BLE")
-    return ble
+    # All failed, default to first configured source (it has its own reconnect loop)
+    fallback_name, fallback = sources[0]
+    logger.warning("No source detected, defaulting to %s", fallback_name)
+    return fallback
 
 
 @asynccontextmanager
