@@ -1,9 +1,10 @@
 import asyncio
 import logging
 import struct
-from datetime import datetime, timezone
+from typing import Any
 
 from bleak import BleakClient, BleakError
+from datetime import datetime, timezone
 
 from andhrimnir.config import Settings
 from andhrimnir.models import ProbeReading
@@ -15,31 +16,32 @@ PROBE_DISCONNECTED = 0xFFFF
 
 
 class BLETemperatureSource(BaseTemperatureSource):
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, **bleak_kwargs: Any) -> None:
         super().__init__()
         self._address = settings.ble_address
         self._char_uuid = settings.ble_char_uuid
         self._reconnect_delay = settings.ble_reconnect_delay
+        self._bleak_kwargs = bleak_kwargs
 
     async def probe(self) -> bool:
         try:
             async with asyncio.timeout(5.0):
-                async with BleakClient(self._address) as client:
+                async with BleakClient(self._address, **self._bleak_kwargs) as client:
                     return client.is_connected
-        except (BleakError, OSError, asyncio.TimeoutError):
+        except Exception:
             return False
 
     async def start(self) -> None:
         while not self._stop_event.is_set():
             try:
                 logger.info("Connecting to BLE device %s ...", self._address)
-                async with BleakClient(self._address) as client:
+                async with BleakClient(self._address, **self._bleak_kwargs) as client:
                     logger.info("Connected to %s", self._address)
                     await client.start_notify(self._char_uuid, self._handle_notification)
                     while client.is_connected and not self._stop_event.is_set():
                         await asyncio.sleep(1.0)
                     await client.stop_notify(self._char_uuid)
-            except (BleakError, OSError, asyncio.TimeoutError) as exc:
+            except Exception as exc:
                 logger.warning("BLE connection error: %s", exc)
 
             if not self._stop_event.is_set():
