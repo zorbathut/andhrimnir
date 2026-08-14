@@ -20,10 +20,19 @@ logger:
 ota:
     platform: esphome
 
+# Remote reboot without a power cycle (visible via the API).
+button:
+  - platform: restart
+    name: Restart
+
+# Low-duty scan: we only scan to discover the device before connecting
+# (readings arrive over the GATT connection).  A 100% scan window starves
+# WiFi via radio coexistence once a BLE connection is up, which freezes the
+# API/network stack on this board.
 esp32_ble_tracker:
   scan_parameters:
-    interval: 1100ms
-    window: 1100ms
+    interval: 320ms
+    window: 30ms
     active: true
 
 esp32_ble:

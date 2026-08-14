@@ -83,6 +83,7 @@ class ESPHomeProxyBackend(BaseBleakClient):
         self._mtu = 23
         self._connected = False
         self._cancel_connection_state = None
+        self._unsub_advs = None
         self._feature_flags = 0
         self._notify_cccd_written: set[int] = set()
 
@@ -117,6 +118,16 @@ class ESPHomeProxyBackend(BaseBleakClient):
             self._feature_flags = device_info.bluetooth_proxy_feature_flags_compat(
                 api.api_version
             )
+
+            # Sweep any stale connection slot for our address.  A dead client
+            # can leave a slot with the address still set; the proxy's loop()
+            # then spams disconnects at it forever and refuses new connects
+            # until an explicit DISCONNECT request clears the slot.  Harmless
+            # no-op when the ESP has no slot for this address.
+            try:
+                await api.bluetooth_device_disconnect(self._address_int, timeout=5.0)
+            except Exception:
+                pass
 
             # Scan for the device to learn its address_type.
             address_type = await self._scan_for_address_type(api)
@@ -154,22 +165,40 @@ class ESPHomeProxyBackend(BaseBleakClient):
             # Discover GATT services.
             await self._discover_services()
         except BaseException:
-            # Shield so an outer cancellation can't interrupt the teardown;
-            # the shielded task finishes even if this await is cancelled.
-            with contextlib.suppress(Exception):
-                await asyncio.shield(self.disconnect())
+            # Shield so an outer cancellation can't interrupt the teardown,
+            # but bound it: against an unresponsive ESP the graceful path can
+            # block indefinitely, and after a cancellation nothing is left to
+            # interrupt this await.  On timeout, force-close the socket.
+            try:
+                async with asyncio.timeout(10.0):
+                    await asyncio.shield(self.disconnect())
+            except BaseException:
+                stale_api, self._api = self._api, None
+                self._connected = False
+                if stale_api is not None:
+                    with contextlib.suppress(Exception):
+                        await stale_api.disconnect(force=True)
             raise
 
     async def disconnect(self) -> None:
         if self._api is not None:
             if self._connected:
                 try:
-                    await self._api.bluetooth_device_disconnect(self._address_int)
+                    await self._api.bluetooth_device_disconnect(
+                        self._address_int, timeout=5.0
+                    )
                 except Exception:
                     pass
             if self._cancel_connection_state is not None:
                 self._cancel_connection_state()
                 self._cancel_connection_state = None
+            # Unsub only after the device is disconnected: dropping the
+            # subscription while a BLE connection is up makes the proxy's
+            # loop() force-disconnect it.
+            if self._unsub_advs is not None:
+                with contextlib.suppress(Exception):
+                    self._unsub_advs()
+                self._unsub_advs = None
             try:
                 await self._api.disconnect()
             except Exception:
@@ -265,16 +294,15 @@ class ESPHomeProxyBackend(BaseBleakClient):
                 if adv.address == self._address_int and not found.done():
                     found.set_result(adv.address_type)
 
-        # The proxy allows only ONE advertisement subscription across all API
-        # clients, so release it the moment we have what we need rather than
-        # holding the slot for the lifetime of the connection.
-        unsub = api.subscribe_bluetooth_le_raw_advertisements(on_raw_advs)
-        try:
-            async with asyncio.timeout(timeout):
-                return await found
-        finally:
-            with contextlib.suppress(Exception):
-                unsub()
+        # The subscription must be HELD for the whole lifetime of the BLE
+        # connection, not just the scan: bluetooth_proxy's loop() actively
+        # disconnects every BLE connection whenever no API client holds the
+        # advertisement subscription.  Released in disconnect().
+        self._unsub_advs = api.subscribe_bluetooth_le_raw_advertisements(
+            on_raw_advs
+        )
+        async with asyncio.timeout(timeout):
+            return await found
 
     async def _discover_services(self) -> None:
         assert self._api
