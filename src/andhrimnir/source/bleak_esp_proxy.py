@@ -1,6 +1,7 @@
 """Bleak backend that routes BLE operations through an ESPHome bluetooth_proxy."""
 
 import asyncio
+import contextlib
 import logging
 from typing import Any
 
@@ -82,7 +83,6 @@ class ESPHomeProxyBackend(BaseBleakClient):
         self._mtu = 23
         self._connected = False
         self._cancel_connection_state = None
-        self._unsub_advs = None
         self._feature_flags = 0
         self._notify_cccd_written: set[int] = set()
 
@@ -108,55 +108,59 @@ class ESPHomeProxyBackend(BaseBleakClient):
         await api.connect(login=True)
         self._api = api
 
-        device_info = await api.device_info()
-        self._feature_flags = device_info.bluetooth_proxy_feature_flags_compat(
-            api.api_version
-        )
+        # Anything that fails past this point must tear the API client down;
+        # otherwise the abandoned connection keeps holding the proxy's single
+        # advertisement subscription slot and blocks every reconnect attempt
+        # until the ESP's keepalive reaps it.
+        try:
+            device_info = await api.device_info()
+            self._feature_flags = device_info.bluetooth_proxy_feature_flags_compat(
+                api.api_version
+            )
 
-        # Scan for the device to learn its address_type.
-        address_type = await self._scan_for_address_type(api)
+            # Scan for the device to learn its address_type.
+            address_type = await self._scan_for_address_type(api)
 
-        # Connect BLE through the proxy.
-        connected_future: asyncio.Future[None] = (
-            asyncio.get_running_loop().create_future()
-        )
+            # Connect BLE through the proxy.
+            connected_future: asyncio.Future[None] = (
+                asyncio.get_running_loop().create_future()
+            )
 
-        def on_state(connected: bool, mtu: int, error: int) -> None:
-            if not connected_future.done():
-                if error:
-                    connected_future.set_exception(
-                        BleakError(f"BLE connect error code {error}")
-                    )
-                elif connected:
-                    self._connected = True
-                    self._mtu = mtu
-                    connected_future.set_result(None)
-                # else: intermediate state, keep waiting
-            elif not connected:
-                self._connected = False
-                if self._disconnected_callback:
-                    self._disconnected_callback()
+            def on_state(connected: bool, mtu: int, error: int) -> None:
+                if not connected_future.done():
+                    if error:
+                        connected_future.set_exception(
+                            BleakError(f"BLE connect error code {error}")
+                        )
+                    elif connected:
+                        self._connected = True
+                        self._mtu = mtu
+                        connected_future.set_result(None)
+                    # else: intermediate state, keep waiting
+                elif not connected:
+                    self._connected = False
+                    if self._disconnected_callback:
+                        self._disconnected_callback()
 
-        self._cancel_connection_state = await api.bluetooth_device_connect(
-            self._address_int,
-            on_state,
-            timeout=kwargs.get("timeout", 30.0),
-            feature_flags=self._feature_flags,
-            address_type=address_type,
-        )
-        await connected_future
+            self._cancel_connection_state = await api.bluetooth_device_connect(
+                self._address_int,
+                on_state,
+                timeout=kwargs.get("timeout", 30.0),
+                feature_flags=self._feature_flags,
+                address_type=address_type,
+            )
+            await connected_future
 
-        # Discover GATT services.
-        await self._discover_services()
+            # Discover GATT services.
+            await self._discover_services()
+        except BaseException:
+            # Shield so an outer cancellation can't interrupt the teardown;
+            # the shielded task finishes even if this await is cancelled.
+            with contextlib.suppress(Exception):
+                await asyncio.shield(self.disconnect())
+            raise
 
     async def disconnect(self) -> None:
-        if self._unsub_advs is not None:
-            try:
-                self._unsub_advs()
-            except Exception:
-                pass
-            self._unsub_advs = None
-
         if self._api is not None:
             if self._connected:
                 try:
@@ -261,16 +265,16 @@ class ESPHomeProxyBackend(BaseBleakClient):
                 if adv.address == self._address_int and not found.done():
                     found.set_result(adv.address_type)
 
-        self._unsub_advs = api.subscribe_bluetooth_le_raw_advertisements(
-            on_raw_advs
-        )
+        # The proxy allows only ONE advertisement subscription across all API
+        # clients, so release it the moment we have what we need rather than
+        # holding the slot for the lifetime of the connection.
+        unsub = api.subscribe_bluetooth_le_raw_advertisements(on_raw_advs)
         try:
             async with asyncio.timeout(timeout):
                 return await found
-        except BaseException:
-            self._unsub_advs()
-            self._unsub_advs = None
-            raise
+        finally:
+            with contextlib.suppress(Exception):
+                unsub()
 
     async def _discover_services(self) -> None:
         assert self._api
