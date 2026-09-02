@@ -5,14 +5,13 @@ from pathlib import Path
 
 import aiosqlite
 
+from andhrimnir.models import PROBE_COUNT
 from andhrimnir.source.base import TemperatureSource
 
 log = logging.getLogger(__name__)
 
-INSERT = """\
-INSERT INTO readings (timestamp, probe1, probe2, probe3, probe4, probe5, probe6)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-"""
+PROBE_COLUMNS = ", ".join(f"probe{i}" for i in range(1, PROBE_COUNT + 1))
+INSERT = f"INSERT INTO readings (timestamp, {PROBE_COLUMNS}) VALUES ({', '.join('?' * (PROBE_COUNT + 1))})"
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
@@ -51,28 +50,9 @@ async def db_writer(source: TemperatureSource, conn: aiosqlite.Connection) -> No
     try:
         while True:
             reading = await queue.get()
-            await conn.execute(
-                INSERT,
-                (
-                    reading.timestamp.isoformat(),
-                    reading.probe1,
-                    reading.probe2,
-                    reading.probe3,
-                    reading.probe4,
-                    reading.probe5,
-                    reading.probe6,
-                ),
-            )
+            await conn.execute(INSERT, (reading.timestamp.isoformat(), *reading.probes))
             await conn.commit()
-            temps = " | ".join(
-                f"P{i}: {t:.1f}°C" if t is not None else f"P{i}: --"
-                for i, t in enumerate(
-                    (reading.probe1, reading.probe2, reading.probe3,
-                     reading.probe4, reading.probe5, reading.probe6),
-                    1,
-                )
-            )
-            log.info(temps)
+            log.info(" | ".join(f"P{i}: {t:.1f}°C" if t is not None else f"P{i}: --" for i, t in enumerate(reading.probes, 1)))
     except asyncio.CancelledError:
         pass
     finally:
@@ -82,10 +62,7 @@ async def db_writer(source: TemperatureSource, conn: aiosqlite.Connection) -> No
 async def get_history(
     conn: aiosqlite.Connection, limit: int = 100, since: str | None = None
 ) -> list[dict]:
-    query = (
-        "SELECT timestamp, probe1, probe2, probe3, probe4, probe5, probe6 "
-        "FROM readings"
-    )
+    query = f"SELECT timestamp, {PROBE_COLUMNS} FROM readings"
     params: list = []
     if since:
         query += " WHERE timestamp >= ?"
@@ -97,14 +74,7 @@ async def get_history(
     return [
         {
             "timestamp": row[0],
-            "probes": {
-                "1": row[1],
-                "2": row[2],
-                "3": row[3],
-                "4": row[4],
-                "5": row[5],
-                "6": row[6],
-            },
+            "probes": {str(i): t for i, t in enumerate(row[1:], 1)},
         }
         for row in rows
     ]

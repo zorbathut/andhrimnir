@@ -7,7 +7,7 @@ from bleak import BleakClient
 from datetime import datetime, timezone
 
 from andhrimnir.config import Settings
-from andhrimnir.models import ProbeReading
+from andhrimnir.models import PROBE_COUNT, ProbeReading
 from andhrimnir.source.base import BaseTemperatureSource
 
 logger = logging.getLogger(__name__)
@@ -57,18 +57,9 @@ class BLETemperatureSource(BaseTemperatureSource):
             return
 
         probes: list[float | None] = []
-        for i in range(6):
+        for i in range(PROBE_COUNT):
             offset = 2 + i * 2
             raw = struct.unpack_from(">H", data, offset)[0]
             probes.append(None if raw == PROBE_DISCONNECTED else raw / 10.0)
 
-        reading = ProbeReading(
-            timestamp=datetime.now(timezone.utc),
-            probe1=probes[0],
-            probe2=probes[1],
-            probe3=probes[2],
-            probe4=probes[3],
-            probe5=probes[4],
-            probe6=probes[5],
-        )
-        self._broadcast(reading)
+        self._broadcast(ProbeReading(timestamp=datetime.now(timezone.utc), probes=tuple(probes)))
