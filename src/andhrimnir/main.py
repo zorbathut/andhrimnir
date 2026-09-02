@@ -54,6 +54,19 @@ def source_make(settings: Settings) -> TemperatureSource:
     )
 
 
+def _task_supervise(task: asyncio.Task, name: str) -> None:
+    """A background task that dies takes its job with it silently; make it say so."""
+
+    def on_done(finished: asyncio.Task) -> None:
+        if finished.cancelled():
+            return
+        exc = finished.exception()
+        if exc is not None:
+            logger.error("%s stopped: %s", name, exc, exc_info=exc)
+
+    task.add_done_callback(on_done)
+
+
 async def _task_stop(task: asyncio.Task) -> None:
     """Cancel a task and wait for it to finish, tolerating one that already died."""
     if not task.done():
@@ -73,6 +86,8 @@ def app_create(settings: Settings, source: TemperatureSource, db_open: DbOpen) -
         app.state.db = conn
         writer_task = asyncio.create_task(db_writer(source, conn))
         source_task = asyncio.create_task(source.start())
+        _task_supervise(writer_task, "Database writer")
+        _task_supervise(source_task, "Temperature source")
         try:
             yield
         finally:

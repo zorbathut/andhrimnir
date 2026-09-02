@@ -54,3 +54,43 @@ def test_the_source_is_started_and_stopped_with_the_app(db_path):
         assert source.started
         assert not source.stopped
     assert source.stopped
+
+
+def test_a_dead_writer_is_reported_and_still_lets_the_app_shut_down(db_path, caplog):
+    """A background task that dies takes persistence with it; shutdown must surface that and still close the database rather than raising out of the lifespan."""
+    source = TemperatureSourceFake()
+
+    async def db_open_broken():
+        conn = await init_db(db_path)
+        await conn.execute("DROP TABLE readings")
+        await conn.commit()
+        return conn
+
+    with caplog.at_level(logging.ERROR):
+        with TestClient(app_create(Settings(db_path=db_path), source, db_open_broken)) as client:
+            source.publish(source.current)
+            for _ in range(200):
+                if "Database writer stopped" in caplog.text:
+                    break
+                client.get("/api/temperatures")
+
+    assert "Database writer stopped" in caplog.text
+    assert "no such table: readings" in caplog.text
+
+
+async def test_task_supervise_reports_an_unhandled_failure(caplog):
+    from andhrimnir.main import _task_supervise
+
+    async def boom():
+        raise RuntimeError("pipeline died")
+
+    with caplog.at_level(logging.ERROR):
+        task = asyncio.create_task(boom())
+        with pytest.raises(RuntimeError):
+            await task
+        await asyncio.sleep(0)
+
+    _task_supervise(task, "Test task")
+    await asyncio.sleep(0)
+    assert "Test task stopped" in caplog.text
+    assert "pipeline died" in caplog.text
