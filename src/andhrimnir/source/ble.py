@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 PROBE_DISCONNECTED = 0xFFFF
 PACKET_LENGTH = 2 + PROBE_COUNT * 2
 
+# A stalled subscriber drops a reading every cycle, so report only every Nth.
+DROP_LOG_INTERVAL = 100
+
 
 def reading_parse(data: bytes | bytearray) -> ProbeReading:
     """Decode one notification packet: a 2-byte header then six big-endian deci-Celsius probes."""
@@ -37,6 +40,7 @@ class TemperatureSourceBLE:
         self._current = ProbeReading(timestamp=datetime.now(timezone.utc))
         self._subscribers: list[asyncio.Queue[ProbeReading]] = []
         self._stop_event = asyncio.Event()
+        self._dropped = 0
 
     async def start(self) -> None:
         while not self._stop_event.is_set():
@@ -69,10 +73,7 @@ class TemperatureSourceBLE:
         return q
 
     def unsubscribe(self, queue: asyncio.Queue[ProbeReading]) -> None:
-        try:
-            self._subscribers.remove(queue)
-        except ValueError:
-            pass
+        self._subscribers.remove(queue)
 
     def _handle_notification(self, _sender: object, data: bytearray) -> None:
         try:
@@ -88,11 +89,9 @@ class TemperatureSourceBLE:
             try:
                 q.put_nowait(reading)
             except asyncio.QueueFull:
-                try:
-                    q.get_nowait()
-                except asyncio.QueueEmpty:
-                    pass
-                try:
-                    q.put_nowait(reading)
-                except asyncio.QueueFull:
-                    pass
+                # Drop the oldest so live consumers always see the newest reading.
+                q.get_nowait()
+                q.put_nowait(reading)
+                if self._dropped % DROP_LOG_INTERVAL == 0:
+                    logger.warning("Subscriber queue full; dropped a reading (%d so far)", self._dropped + 1)
+                self._dropped += 1

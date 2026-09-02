@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 import pytest
 
@@ -85,3 +86,15 @@ async def test_stop_during_the_reconnect_delay_returns_promptly():
     await asyncio.wait_for(task, timeout=1.0)
     assert not task.cancelled()
     assert client.attempts == 1  # it did not sit out the delay and retry
+
+
+def test_a_dropped_reading_is_reported(caplog):
+    """A stalled subscriber silently losing readings is exactly the failure the logging rule exists for."""
+    source = source_make(BleakClientFake())
+    queue = source.subscribe()
+
+    with caplog.at_level(logging.WARNING):
+        for i in range(queue.maxsize + 1):
+            source._broadcast(reading_make(float(i)))
+
+    assert "dropped a reading" in caplog.text

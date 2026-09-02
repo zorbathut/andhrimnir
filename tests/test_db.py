@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 from datetime import datetime, timedelta, timezone
 
 import aiosqlite
@@ -72,7 +71,7 @@ async def test_db_writer_persists_readings(conn):
             break
 
     task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
+    with pytest.raises(asyncio.CancelledError):
         await task
 
     assert rows[0]["probes"] == {"1": 21.5, "2": None, "3": 93.0, "4": None, "5": None, "6": None}

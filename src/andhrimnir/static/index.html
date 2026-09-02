@@ -349,7 +349,7 @@
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ name: newName })
-                }).catch(function() {});
+                }).catch(function(e) { console.error("Saving probe name failed", e); });
             }
 
             var committed = false;
@@ -403,7 +403,7 @@
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(alertThresholds[num])
-            }).catch(function() {});
+            }).catch(function(e) { console.error("Saving threshold failed", e); });
         });
 
         document.addEventListener("click", function(e) {
@@ -640,7 +640,7 @@
             fetch("/api/temperatures/history?since=" + encodeURIComponent(since) + "&limit=" + limit)
                 .then(function(r) { return r.json(); })
                 .then(buildCharts)
-                .catch(function() {});
+                .catch(function(e) { console.error("Fetching history failed", e); });
         }
 
         // Period button clicks
@@ -677,10 +677,12 @@
         fetch("/api/temperatures")
             .then(function(r) { return r.json(); })
             .then(renderProbes)
-            .catch(function() {});
+            .catch(function(e) { console.error("Fetching current temperatures failed", e); });
 
         connect();
-        Promise.all([fetchProbeNames(), fetchThresholds()]).then(fetchHistory).catch(fetchHistory);
+        Promise.all([fetchProbeNames(), fetchThresholds()]).catch(function(e) {
+            console.error("Fetching probe names/thresholds failed; charting anyway", e);
+        }).then(fetchHistory);
     </script>
 </body>
 </html>

@@ -1,4 +1,3 @@
-import asyncio
 import importlib
 import logging
 from pathlib import Path
@@ -8,7 +7,7 @@ import aiosqlite
 from andhrimnir.models import PROBE_COUNT
 from andhrimnir.source.base import TemperatureSource
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 PROBE_COLUMNS = ", ".join(f"probe{i}" for i in range(1, PROBE_COUNT + 1))
 INSERT = f"INSERT INTO readings (timestamp, {PROBE_COLUMNS}) VALUES ({', '.join('?' * (PROBE_COUNT + 1))})"
@@ -36,11 +35,11 @@ async def init_db(db_path: str) -> aiosqlite.Connection:
         await module.migrate(conn)
         await conn.execute("INSERT INTO schema_version VALUES (?)", (version,))
         await conn.commit()
-        log.info("Applied migration %04d (%s)", version, path.stem)
+        logger.info("Applied migration %04d (%s)", version, path.stem)
 
     cursor = await conn.execute("SELECT MAX(version) FROM schema_version")
     row = await cursor.fetchone()
-    log.info("Database schema version: %d", row[0] or 0)
+    logger.info("Database schema version: %d", row[0] or 0)
 
     return conn
 
@@ -52,9 +51,7 @@ async def db_writer(source: TemperatureSource, conn: aiosqlite.Connection) -> No
             reading = await queue.get()
             await conn.execute(INSERT, (reading.timestamp.isoformat(), *reading.probes))
             await conn.commit()
-            log.info(" | ".join(f"P{i}: {t:.1f}°C" if t is not None else f"P{i}: --" for i, t in enumerate(reading.probes, 1)))
-    except asyncio.CancelledError:
-        pass
+            logger.info(" | ".join(f"P{i}: {t:.1f}°C" if t is not None else f"P{i}: --" for i, t in enumerate(reading.probes, 1)))
     finally:
         source.unsubscribe(queue)
 

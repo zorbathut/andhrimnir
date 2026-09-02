@@ -1,7 +1,6 @@
 """Bleak backend that routes BLE operations through an ESPHome bluetooth_proxy."""
 
 import asyncio
-import contextlib
 import logging
 from typing import Any
 
@@ -17,9 +16,9 @@ from bleak.backends.service import (
 )
 from bleak.exc import BleakError
 
-# Patch aioesphomeapi's UUID parser to handle empty UUID lists instead of
-# crashing with IndexError.  Some BLE devices send services with neither
-# short_uuid nor a full 128-bit UUID array.
+# Patch aioesphomeapi's UUID parser to handle empty UUID lists instead of crashing with IndexError.
+#
+# Some BLE devices send services with neither short_uuid nor a full 128-bit UUID array.
 _orig_join_split_uuid = _ble_model._join_split_uuid
 
 
@@ -34,6 +33,9 @@ _ble_model._join_split_uuid = _safe_join_split_uuid
 logger = logging.getLogger(__name__)
 
 CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
+
+# How long to wait for the device to advertise before giving up on learning its address type.
+SCAN_TIMEOUT = 30.0
 
 _PROPERTY_NAMES = [
     "broadcast",
@@ -115,9 +117,7 @@ class BleakClientESPHome(BaseBleakClient):
         # until the ESP's keepalive reaps it.
         try:
             device_info = await api.device_info()
-            self._feature_flags = device_info.bluetooth_proxy_feature_flags_compat(
-                api.api_version
-            )
+            self._feature_flags = device_info.bluetooth_proxy_feature_flags_compat(api.api_version)
 
             # Sweep any stale connection slot for our address.  A dead client
             # can leave a slot with the address still set; the proxy's loop()
@@ -126,16 +126,14 @@ class BleakClientESPHome(BaseBleakClient):
             # no-op when the ESP has no slot for this address.
             try:
                 await api.bluetooth_device_disconnect(self._address_int, timeout=5.0)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Stale-slot sweep for %s failed (harmless if no slot existed): %s", self.address, exc)
 
             # Scan for the device to learn its address_type.
             address_type = await self._scan_for_address_type(api)
 
             # Connect BLE through the proxy.
-            connected_future: asyncio.Future[None] = (
-                asyncio.get_running_loop().create_future()
-            )
+            connected_future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
 
             def on_state(connected: bool, mtu: int, error: int) -> None:
                 if not connected_future.done():
@@ -173,22 +171,23 @@ class BleakClientESPHome(BaseBleakClient):
                 async with asyncio.timeout(10.0):
                     await asyncio.shield(self.disconnect())
             except BaseException:
+                logger.warning("Graceful teardown of %s failed; forcing the socket closed", self.address)
                 stale_api, self._api = self._api, None
                 self._connected = False
                 if stale_api is not None:
-                    with contextlib.suppress(Exception):
+                    try:
                         await stale_api.disconnect(force=True)
+                    except Exception as exc:
+                        logger.debug("Forced disconnect of %s failed: %s", self._esp_host, exc)
             raise
 
     async def disconnect(self) -> None:
         if self._api is not None:
             if self._connected:
                 try:
-                    await self._api.bluetooth_device_disconnect(
-                        self._address_int, timeout=5.0
-                    )
-                except Exception:
-                    pass
+                    await self._api.bluetooth_device_disconnect(self._address_int, timeout=5.0)
+                except Exception as exc:
+                    logger.debug("BLE disconnect of %s failed: %s", self.address, exc)
             if self._cancel_connection_state is not None:
                 self._cancel_connection_state()
                 self._cancel_connection_state = None
@@ -196,13 +195,15 @@ class BleakClientESPHome(BaseBleakClient):
             # subscription while a BLE connection is up makes the proxy's
             # loop() force-disconnect it.
             if self._unsub_advs is not None:
-                with contextlib.suppress(Exception):
+                try:
                     self._unsub_advs()
+                except Exception as exc:
+                    logger.debug("Releasing the advertisement subscription failed: %s", exc)
                 self._unsub_advs = None
             try:
                 await self._api.disconnect()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("API disconnect from %s failed: %s", self._esp_host, exc)
             self._api = None
         self._connected = False
 
@@ -267,9 +268,7 @@ class BleakClientESPHome(BaseBleakClient):
             )
             self._notify_cccd_written.add(characteristic.handle)
 
-    async def stop_notify(
-        self, characteristic: BleakGATTCharacteristic
-    ) -> None:
+    async def stop_notify(self, characteristic: BleakGATTCharacteristic) -> None:
         assert self._api
         await self._api.bluetooth_gatt_stop_notify(
             self._address_int, characteristic.handle
@@ -284,9 +283,7 @@ class BleakClientESPHome(BaseBleakClient):
 
     # -- internals -------------------------------------------------------------
 
-    async def _scan_for_address_type(
-        self, api: APIClient, timeout: float = 30.0
-    ) -> int:
+    async def _scan_for_address_type(self, api: APIClient) -> int:
         found: asyncio.Future[int] = asyncio.get_running_loop().create_future()
 
         def on_raw_advs(msg: object) -> None:
@@ -298,10 +295,8 @@ class BleakClientESPHome(BaseBleakClient):
         # connection, not just the scan: bluetooth_proxy's loop() actively
         # disconnects every BLE connection whenever no API client holds the
         # advertisement subscription.  Released in disconnect().
-        self._unsub_advs = api.subscribe_bluetooth_le_raw_advertisements(
-            on_raw_advs
-        )
-        async with asyncio.timeout(timeout):
+        self._unsub_advs = api.subscribe_bluetooth_le_raw_advertisements(on_raw_advs)
+        async with asyncio.timeout(SCAN_TIMEOUT):
             return await found
 
     async def _discover_services(self) -> None:
