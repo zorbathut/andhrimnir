@@ -3,7 +3,7 @@ import logging
 import struct
 from typing import Any
 
-from bleak import BleakClient, BleakError
+from bleak import BleakClient
 from datetime import datetime, timezone
 
 from andhrimnir.config import Settings

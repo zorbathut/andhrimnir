@@ -1,6 +1,6 @@
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 
 
 def _sanitize(value: float | None) -> float | str | None:

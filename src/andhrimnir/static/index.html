@@ -21,7 +21,6 @@
         .status.connected { color: #2e7d32; }
         .status.error { color: #c62828; }
 
-        .charts-section {}
         .period-chooser {
             display: flex;
             gap: 0.5rem;
@@ -238,7 +237,12 @@
         }
 
         function renderProbes(data) {
-            // Update live temps inside chart rows
+            renderLiveTemps(data);
+            appendToCharts(data);
+            checkAlerts(data);
+        }
+
+        function renderLiveTemps(data) {
             for (const [num, tempC] of Object.entries(data.probes)) {
                 var el = document.getElementById("live-temp-" + num);
                 if (!el) continue;
@@ -323,13 +327,6 @@
             return fetch("/api/probes/names")
                 .then(function(r) { return r.json(); })
                 .then(function(names) { probeNames = names; });
-        }
-
-        function applyProbeNames() {
-            document.querySelectorAll(".chart-label").forEach(function(el) {
-                var num = el.dataset.probe;
-                if (num && probeNames[num]) el.textContent = probeNames[num];
-            });
         }
 
         function makeEditable(labelEl) {
@@ -676,14 +673,6 @@
                 charts[num].update();
             });
         }
-
-        // Patch renderProbes to also feed charts
-        var _origRender = renderProbes;
-        renderProbes = function(data) {
-            _origRender(data);
-            appendToCharts(data);
-            checkAlerts(data);
-        };
 
         fetch("/api/temperatures")
             .then(function(r) { return r.json(); })

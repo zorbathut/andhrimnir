@@ -7,14 +7,12 @@ from pathlib import Path
 @dataclass
 class Settings:
     ble_address: str = ""
-    ble_service_uuid: str = "0000ffb0-0000-1000-8000-00805f9b34fb"
     ble_char_uuid: str = "0000ffb2-0000-1000-8000-00805f9b34fb"
     ble_reconnect_delay: float = 5.0
     esp_host: str = ""
     esp_port: int = 6053
     esp_password: str = ""
     esp_noise_psk: str = ""
-    esp_reconnect_delay: float = 5.0
     host: str = "0.0.0.0"
     port: int = 8000
     db_path: str = "andhrimnir.db"
@@ -44,8 +42,6 @@ class Settings:
         # Env vars override config file
         if v := os.environ.get("ANDHRIMNIR_BLE_ADDRESS"):
             kwargs["ble_address"] = v
-        if v := os.environ.get("ANDHRIMNIR_BLE_SERVICE_UUID"):
-            kwargs["ble_service_uuid"] = v
         if v := os.environ.get("ANDHRIMNIR_BLE_CHAR_UUID"):
             kwargs["ble_char_uuid"] = v
         if v := os.environ.get("ANDHRIMNIR_BLE_RECONNECT_DELAY"):
@@ -58,8 +54,6 @@ class Settings:
             kwargs["esp_password"] = v
         if v := os.environ.get("ANDHRIMNIR_ESP_NOISE_PSK"):
             kwargs["esp_noise_psk"] = v
-        if v := os.environ.get("ANDHRIMNIR_ESP_RECONNECT_DELAY"):
-            kwargs["esp_reconnect_delay"] = float(v)
         if v := os.environ.get("ANDHRIMNIR_HOST"):
             kwargs["host"] = v
         if v := os.environ.get("ANDHRIMNIR_PORT"):
@@ -71,7 +65,6 @@ class Settings:
 
 _TOML_BLE = {
     "address": "ble_address",
-    "service_uuid": "ble_service_uuid",
     "char_uuid": "ble_char_uuid",
     "reconnect_delay": "ble_reconnect_delay",
 }
@@ -81,7 +74,6 @@ _TOML_ESP = {
     "port": "esp_port",
     "password": "esp_password",
     "noise_psk": "esp_noise_psk",
-    "reconnect_delay": "esp_reconnect_delay",
 }
 
 _TOML_SERVER = {

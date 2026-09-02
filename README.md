@@ -26,7 +26,6 @@ All settings are optional and read from environment variables:
 | Variable | Default | Description |
 |---|---|---|
 | `ANDHRIMNIR_BLE_ADDRESS` | `02:CA:6A:21:A7:16` | BLE device MAC address |
-| `ANDHRIMNIR_BLE_SERVICE_UUID` | `0000ffb0-...` | GATT service UUID |
 | `ANDHRIMNIR_BLE_CHAR_UUID` | `0000ffb2-...` | GATT characteristic UUID |
 | `ANDHRIMNIR_BLE_RECONNECT_DELAY` | `5.0` | Seconds between reconnection attempts |
 | `ANDHRIMNIR_HOST` | `0.0.0.0` | Server bind address |
