@@ -32,13 +32,11 @@ class Settings:
         return "esp" if self.esp_host else "ble"
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def load(cls, config_path: Path) -> "Settings":
         kwargs: dict = {}
 
-        # Load config.toml if present
-        cfg = Path("config.toml")
-        if cfg.exists():
-            with open(cfg, "rb") as f:
+        if config_path.exists():
+            with open(config_path, "rb") as f:
                 toml = tomllib.load(f)
             ble = toml.get("ble", {})
             esp = toml.get("esp", {})
@@ -76,6 +74,9 @@ class Settings:
             kwargs["db_path"] = v
         if v := os.environ.get("ANDHRIMNIR_SOURCE"):
             kwargs["source"] = v
+
+        # Resolve before construction so Settings.load and Settings(...) agree on the field.
+        kwargs["db_path"] = str(Path(kwargs.get("db_path", cls.db_path)).resolve())
 
         settings = cls(**kwargs)
         if settings.source and settings.source not in SOURCE_KINDS:

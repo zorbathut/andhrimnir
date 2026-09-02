@@ -2,7 +2,9 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Awaitable, Callable
 
+import aiosqlite
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
@@ -17,7 +19,9 @@ from andhrimnir.source.bleak_client_esphome import BleakClientESPHome
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
 logger = logging.getLogger(__name__)
 
-settings = Settings.from_env()
+CONFIG_PATH = Path("config.toml").resolve()
+
+DbOpen = Callable[[], Awaitable[aiosqlite.Connection]]
 
 
 def source_make(settings: Settings) -> TemperatureSource:
@@ -44,43 +48,48 @@ def source_make(settings: Settings) -> TemperatureSource:
     return TemperatureSourceBLE(settings, **kwargs)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    source = source_make(settings)
+def app_create(settings: Settings, source: TemperatureSource, db_open: DbOpen) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        conn = await db_open()
+        app.state.db = conn
+        writer_task = asyncio.create_task(db_writer(source, conn))
+        source_task = asyncio.create_task(source.start())
+        yield
+        await source.stop()
+        writer_task.cancel()
+        source_task.cancel()
+        try:
+            await writer_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await source_task
+        except asyncio.CancelledError:
+            pass
+        await conn.close()
+
+    app = FastAPI(title="Andhrimnir", lifespan=lifespan)
     app.state.source = source
-    conn = await init_db(settings.db_path)
-    app.state.db = conn
-    writer_task = asyncio.create_task(db_writer(source, conn))
-    source_task = asyncio.create_task(source.start())
-    yield
-    await source.stop()
-    writer_task.cancel()
-    source_task.cancel()
-    try:
-        await writer_task
-    except asyncio.CancelledError:
-        pass
-    try:
-        await source_task
-    except asyncio.CancelledError:
-        pass
-    await conn.close()
+
+    app.include_router(api_router)
+    app.include_router(ws_router)
+    app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")
+    return app
 
 
-app = FastAPI(title="Andhrimnir", lifespan=lifespan)
-
-app.include_router(api_router)
-app.include_router(ws_router)
-
-static_dir = Path(__file__).parent / "static"
-app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+def app_factory() -> FastAPI:
+    settings = Settings.load(CONFIG_PATH)
+    return app_create(settings, source_make(settings), lambda: init_db(settings.db_path))
 
 
 def cli() -> None:
     import uvicorn
 
+    settings = Settings.load(CONFIG_PATH)
     uvicorn.run(
-        "andhrimnir.main:app",
+        "andhrimnir.main:app_factory",
+        factory=True,
         host=settings.host,
         port=settings.port,
         log_level="info",
