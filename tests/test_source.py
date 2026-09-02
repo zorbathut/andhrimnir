@@ -5,7 +5,7 @@ import pytest
 
 from andhrimnir.source.ble import PROBE_DISCONNECTED, TemperatureSourceBLE, reading_parse
 
-from .fakes import BleakClientFake, packet_make, reading_make, until
+from .fakes import BleakClientFake, packet_make, reading_make, until, until
 
 CHAR_UUID = "0000ffb2-0000-1000-8000-00805f9b34fb"
 
@@ -98,3 +98,115 @@ def test_a_dropped_reading_is_reported(caplog):
             source._broadcast(reading_make(float(i)))
 
     assert "dropped a reading" in caplog.text
+
+
+async def test_notifications_reach_subscribers():
+    client = BleakClientFake()
+    source = source_make(client)
+    queue = source.subscribe()
+    task = asyncio.create_task(source.start())
+
+    await until(lambda: client.notifying, "the client to start notifying")
+    client.notify(packet_make(215))
+
+    await source.stop()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    assert queue.get_nowait().probes[0] == 21.5
+
+
+async def test_a_failed_connection_is_logged_and_retried(caplog):
+    client = BleakClientFake(connect_errors=[OSError("device unreachable"), None])
+    source = source_make(client)
+
+    with caplog.at_level(logging.WARNING):
+        task = asyncio.create_task(source.start())
+        await until(lambda: client.notifying, "the retry to connect")
+        await source.stop()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    assert client.attempts == 2  # it retried rather than giving up
+    assert "device unreachable" in caplog.text  # and said why
+
+
+async def test_stop_ends_the_loop_without_cancellation():
+    """Shutdown must return through the normal path so the client's own teardown runs."""
+    client = BleakClientFake()
+    source = source_make(client)
+    task = asyncio.create_task(source.start())
+
+    await until(lambda: client.notifying, "the client to start notifying")
+
+    await source.stop()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    assert not task.cancelled()
+    assert client.stop_notify_calls == 1
+    assert not client.is_connected
+
+
+async def test_stop_while_connecting_does_not_wait_for_the_radio():
+    """Nothing is connected yet, so there is no graceful teardown to wait on — shutting down must not block until the connect attempt times out."""
+    client = BleakClientFake(connect_hangs=True)
+    source = source_make(client)
+    task = asyncio.create_task(source.start())
+
+    await until(lambda: client.attempts == 1, "the first connect attempt")
+
+    await source.stop()
+    await asyncio.wait_for(task, timeout=0.5)
+    assert not task.cancelled()
+
+
+async def test_cancelling_start_does_not_strand_the_session():
+    """asyncio.wait leaves what it waits on running, so a hard cancel could otherwise leave the BLE client open past our own teardown."""
+    client = BleakClientFake()
+    source = source_make(client)
+    task = asyncio.create_task(source.start())
+    await until(lambda: client.notifying, "the client to connect")
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    running = [t for t in asyncio.all_tasks() if "_session_run" in t.get_coro().__qualname__]
+    assert running == []
+    assert not client.is_connected
+
+
+async def test_a_session_that_reports_itself_cancelled_is_logged(caplog):
+    """Some bleak transports raise CancelledError from inside; the task then reads as cancelled and .exception() re-raises, which would lose the failure entirely."""
+    source = source_make(BleakClientFake())
+
+    async def session_cancel():
+        raise asyncio.CancelledError("from inside the transport")
+
+    source._session_run = session_cancel
+    with caplog.at_level(logging.WARNING):
+        task = asyncio.create_task(source.start())
+        await until(lambda: "cancellation" in caplog.text, "the cancellation to be reported")
+        await source.stop()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    assert "BLE session ended in cancellation" in caplog.text
+
+
+async def test_a_teardown_failure_during_shutdown_is_reported(caplog):
+    """The shutdown path must not be quieter than the reconnect path."""
+    source = source_make(BleakClientFake())
+    started = asyncio.Event()
+
+    async def session_fail_on_stop():
+        started.set()
+        await source._stop_wait(30.0)
+        raise OSError("disconnect failed")
+
+    source._session_run = session_fail_on_stop
+    with caplog.at_level(logging.WARNING):
+        task = asyncio.create_task(source.start())
+        await started.wait()
+        source._connected = True  # a live connection is left to close itself
+        await source.stop()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    assert "disconnect failed" in caplog.text

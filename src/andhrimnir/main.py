@@ -21,6 +21,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path("config.toml").resolve()
+SHUTDOWN_TIMEOUT = 5.0
 
 DbOpen = Callable[[], Awaitable[aiosqlite.Connection]]
 
@@ -53,6 +54,18 @@ def source_make(settings: Settings) -> TemperatureSource:
     )
 
 
+async def _task_stop(task: asyncio.Task) -> None:
+    """Cancel a task and wait for it to finish, tolerating one that already died."""
+    if not task.done():
+        task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        logger.debug("%s had already failed before shutdown: %s", task.get_name(), exc)
+
+
 def app_create(settings: Settings, source: TemperatureSource, db_open: DbOpen) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -60,19 +73,17 @@ def app_create(settings: Settings, source: TemperatureSource, db_open: DbOpen) -
         app.state.db = conn
         writer_task = asyncio.create_task(db_writer(source, conn))
         source_task = asyncio.create_task(source.start())
-        yield
-        await source.stop()
-        writer_task.cancel()
-        source_task.cancel()
         try:
-            await writer_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            await source_task
-        except asyncio.CancelledError:
-            pass
-        await conn.close()
+            yield
+        finally:
+            # Let the source close its BLE connection itself; cancelling straight away tears the client down inside an already-cancelled task, so its teardown raises at the first await and the proxy keeps an abandoned connection until its next keepalive sweep.
+            await source.stop()
+            _, pending = await asyncio.wait([source_task], timeout=SHUTDOWN_TIMEOUT)
+            if pending:
+                logger.warning("Source did not stop within %ss; cancelling", SHUTDOWN_TIMEOUT)
+                await _task_stop(source_task)
+            await _task_stop(writer_task)
+            await conn.close()
 
     app = FastAPI(title="Andhrimnir", lifespan=lifespan)
     app.state.source = source
