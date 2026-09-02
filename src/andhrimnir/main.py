@@ -12,7 +12,7 @@ from andhrimnir.config import ConfigError, Settings
 from andhrimnir.db import db_writer, init_db
 from andhrimnir.source.base import TemperatureSource
 from andhrimnir.source.ble import TemperatureSourceBLE
-from andhrimnir.source.bleak_esp_proxy import ESPHomeProxyBackend
+from andhrimnir.source.bleak_client_esphome import BleakClientESPHome
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ def source_make(settings: Settings) -> TemperatureSource:
     if settings.source_kind == "esp":
         logger.info("Reading probes over the ESP proxy at %s:%d", settings.esp_host, settings.esp_port)
         kwargs = dict(
-            backend=ESPHomeProxyBackend,
+            backend=BleakClientESPHome,
             esp_host=settings.esp_host,
             esp_port=settings.esp_port,
             esp_password=settings.esp_password,

@@ -55,7 +55,7 @@ def _props_to_list(bitmask: int) -> list[str]:
     return [name for i, name in enumerate(_PROPERTY_NAMES) if bitmask & (1 << i)]
 
 
-class ESPHomeProxyBackend(BaseBleakClient):
+class BleakClientESPHome(BaseBleakClient):
     """A Bleak backend that connects to BLE devices via an ESPHome bluetooth_proxy.
 
     Extra keyword arguments for ``BleakClient``:
