@@ -1,12 +1,5 @@
-import math
 from dataclasses import dataclass
 from datetime import datetime
-
-
-def _sanitize(value: float | None) -> float | str | None:
-    if value is not None and math.isnan(value):
-        return "NaN"
-    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,11 +18,11 @@ class ProbeReading:
         return {
             "timestamp": self.timestamp.isoformat(),
             "probes": {
-                "1": _sanitize(self.probe1),
-                "2": _sanitize(self.probe2),
-                "3": _sanitize(self.probe3),
-                "4": _sanitize(self.probe4),
-                "5": _sanitize(self.probe5),
-                "6": _sanitize(self.probe6),
+                "1": self.probe1,
+                "2": self.probe2,
+                "3": self.probe3,
+                "4": self.probe4,
+                "5": self.probe5,
+                "6": self.probe6,
             },
         }
