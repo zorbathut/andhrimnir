@@ -3,6 +3,12 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+SOURCE_KINDS = ("ble", "esp")
+
+
+class ConfigError(Exception):
+    """A setting was supplied but could not be used."""
+
 
 @dataclass
 class Settings:
@@ -16,6 +22,14 @@ class Settings:
     host: str = "0.0.0.0"
     port: int = 8000
     db_path: str = "andhrimnir.db"
+    source: str = ""
+
+    @property
+    def source_kind(self) -> str:
+        """Which backend to read probes through; defaults to the proxy when one is configured."""
+        if self.source:
+            return self.source
+        return "esp" if self.esp_host else "ble"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -60,7 +74,13 @@ class Settings:
             kwargs["port"] = int(v)
         if v := os.environ.get("ANDHRIMNIR_DB_PATH"):
             kwargs["db_path"] = v
-        return cls(**kwargs)
+        if v := os.environ.get("ANDHRIMNIR_SOURCE"):
+            kwargs["source"] = v
+
+        settings = cls(**kwargs)
+        if settings.source and settings.source not in SOURCE_KINDS:
+            raise ConfigError(f"source: expected one of {', '.join(SOURCE_KINDS)}, got {settings.source!r}")
+        return settings
 
 
 _TOML_BLE = {
@@ -80,4 +100,5 @@ _TOML_SERVER = {
     "host": "host",
     "port": "port",
     "db_path": "db_path",
+    "source": "source",
 }

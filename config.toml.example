@@ -13,3 +13,6 @@ noise_psk = ""
 host = "0.0.0.0"
 port = 8000
 db_path = "andhrimnir.db"
+# "esp" reads probes through the ESPHome bluetooth_proxy, "ble" through this host's
+# own radio.  Defaults to "esp" when esp.host is set, otherwise "ble".
+source = "esp"

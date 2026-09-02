@@ -23,14 +23,6 @@ class BLETemperatureSource(BaseTemperatureSource):
         self._reconnect_delay = settings.ble_reconnect_delay
         self._bleak_kwargs = bleak_kwargs
 
-    async def probe(self) -> bool:
-        try:
-            async with asyncio.timeout(5.0):
-                async with BleakClient(self._address, **self._bleak_kwargs) as client:
-                    return client.is_connected
-        except Exception:
-            return False
-
     async def start(self) -> None:
         while not self._stop_event.is_set():
             try:

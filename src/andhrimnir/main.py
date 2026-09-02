@@ -3,13 +3,12 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from aioesphomeapi import APIClient
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from andhrimnir.api.routes import router as api_router
 from andhrimnir.api.websocket import router as ws_router
-from andhrimnir.config import Settings
+from andhrimnir.config import ConfigError, Settings
 from andhrimnir.db import db_writer, init_db
 from andhrimnir.source.base import TemperatureSource
 from andhrimnir.source.ble import BLETemperatureSource
@@ -21,58 +20,33 @@ logger = logging.getLogger(__name__)
 settings = Settings.from_env()
 
 
-def _esp_bleak_kwargs(settings: Settings) -> dict:
-    return dict(
-        backend=ESPHomeProxyBackend,
-        esp_host=settings.esp_host,
-        esp_port=settings.esp_port,
-        esp_password=settings.esp_password,
-        esp_noise_psk=settings.esp_noise_psk,
-    )
+def source_make(settings: Settings) -> TemperatureSource:
+    """Build the temperature source for the configured backend.
 
+    Both backends are the same BLE source; they differ only in which bleak transport reaches the thermometer — this host's own radio, or an ESPHome bluetooth_proxy.
+    """
+    if not settings.ble_address:
+        raise ConfigError("ble.address is required (set it in config.toml or ANDHRIMNIR_BLE_ADDRESS)")
 
-async def _esp_reachable(settings: Settings) -> bool:
-    """Quick check: can we connect to the ESPHome API?"""
-    client = APIClient(
-        address=settings.esp_host,
-        port=settings.esp_port,
-        password=settings.esp_password,
-        noise_psk=settings.esp_noise_psk or None,
-    )
-    try:
-        async with asyncio.timeout(5.0):
-            await client.connect(login=True)
-            await client.disconnect()
-            return True
-    except Exception:
-        return False
+    if settings.source_kind == "esp":
+        logger.info("Reading probes over the ESP proxy at %s:%d", settings.esp_host, settings.esp_port)
+        kwargs = dict(
+            backend=ESPHomeProxyBackend,
+            esp_host=settings.esp_host,
+            esp_port=settings.esp_port,
+            esp_password=settings.esp_password,
+            esp_noise_psk=settings.esp_noise_psk,
+        )
+    else:
+        logger.info("Reading probes over the local BLE radio")
+        kwargs = {}
 
-
-async def _detect_source(settings: Settings) -> TemperatureSource:
-    """Pick the best available temperature source."""
-    if settings.esp_host and settings.ble_address:
-        if await _esp_reachable(settings):
-            logger.info("ESP proxy detected, using ESP proxy source")
-            return BLETemperatureSource(settings, **_esp_bleak_kwargs(settings))
-
-    if settings.ble_address:
-        source = BLETemperatureSource(settings)
-        if await source.probe():
-            logger.info("BLE device detected, using direct BLE source")
-            return source
-
-    # Nothing responded — default to ESP proxy if configured, else direct BLE.
-    if settings.esp_host and settings.ble_address:
-        logger.warning("No source detected, defaulting to ESP proxy")
-        return BLETemperatureSource(settings, **_esp_bleak_kwargs(settings))
-
-    logger.warning("No source detected, defaulting to direct BLE")
-    return BLETemperatureSource(settings)
+    return BLETemperatureSource(settings, **kwargs)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    source = await _detect_source(settings)
+    source = source_make(settings)
     app.state.source = source
     conn = await init_db(settings.db_path)
     app.state.db = conn
