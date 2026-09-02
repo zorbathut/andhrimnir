@@ -2,26 +2,38 @@ import asyncio
 import logging
 import struct
 from datetime import datetime, timezone
-from typing import Any
+from typing import Callable
 
 from bleak import BleakClient
 
-from andhrimnir.config import Settings
 from andhrimnir.models import PROBE_COUNT, ProbeReading
 
 logger = logging.getLogger(__name__)
 
 PROBE_DISCONNECTED = 0xFFFF
+PACKET_LENGTH = 2 + PROBE_COUNT * 2
+
+
+def reading_parse(data: bytes | bytearray) -> ProbeReading:
+    """Decode one notification packet: a 2-byte header then six big-endian deci-Celsius probes."""
+    if len(data) < PACKET_LENGTH:
+        raise ValueError(f"expected at least {PACKET_LENGTH} bytes, got {len(data)}")
+
+    probes = []
+    for i in range(PROBE_COUNT):
+        raw = struct.unpack_from(">H", data, 2 + i * 2)[0]
+        probes.append(None if raw == PROBE_DISCONNECTED else raw / 10.0)
+
+    return ProbeReading(timestamp=datetime.now(timezone.utc), probes=tuple(probes))
 
 
 class TemperatureSourceBLE:
     """Streams probe readings off a BLE thermometer, reconnecting for as long as it runs."""
 
-    def __init__(self, settings: Settings, **bleak_kwargs: Any) -> None:
-        self._address = settings.ble_address
-        self._char_uuid = settings.ble_char_uuid
-        self._reconnect_delay = settings.ble_reconnect_delay
-        self._bleak_kwargs = bleak_kwargs
+    def __init__(self, char_uuid: str, reconnect_delay: float, client_make: Callable[[], BleakClient]) -> None:
+        self._char_uuid = char_uuid
+        self._reconnect_delay = reconnect_delay
+        self._client_make = client_make
         self._current = ProbeReading(timestamp=datetime.now(timezone.utc))
         self._subscribers: list[asyncio.Queue[ProbeReading]] = []
         self._stop_event = asyncio.Event()
@@ -29,9 +41,8 @@ class TemperatureSourceBLE:
     async def start(self) -> None:
         while not self._stop_event.is_set():
             try:
-                logger.info("Connecting to BLE device %s ...", self._address)
-                async with BleakClient(self._address, **self._bleak_kwargs) as client:
-                    logger.info("Connected to %s", self._address)
+                async with self._client_make() as client:
+                    logger.info("Connected to BLE device")
                     await client.start_notify(self._char_uuid, self._handle_notification)
                     while client.is_connected and not self._stop_event.is_set():
                         await asyncio.sleep(1.0)
@@ -63,17 +74,13 @@ class TemperatureSourceBLE:
         except ValueError:
             pass
 
-    def _handle_notification(self, _sender: int, data: bytearray) -> None:
-        if len(data) < 14:
-            logger.warning("Short BLE packet: %d bytes", len(data))
+    def _handle_notification(self, _sender: object, data: bytearray) -> None:
+        try:
+            reading = reading_parse(data)
+        except ValueError as exc:
+            logger.warning("Malformed BLE packet: %s", exc)
             return
-
-        probes: list[float | None] = []
-        for i in range(PROBE_COUNT):
-            raw = struct.unpack_from(">H", data, 2 + i * 2)[0]
-            probes.append(None if raw == PROBE_DISCONNECTED else raw / 10.0)
-
-        self._broadcast(ProbeReading(timestamp=datetime.now(timezone.utc), probes=tuple(probes)))
+        self._broadcast(reading)
 
     def _broadcast(self, reading: ProbeReading) -> None:
         self._current = reading

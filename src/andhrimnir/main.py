@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 import aiosqlite
+from bleak import BleakClient
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
@@ -45,7 +46,11 @@ def source_make(settings: Settings) -> TemperatureSource:
         logger.info("Reading probes over the local BLE radio")
         kwargs = {}
 
-    return TemperatureSourceBLE(settings, **kwargs)
+    return TemperatureSourceBLE(
+        char_uuid=settings.ble_char_uuid,
+        reconnect_delay=settings.ble_reconnect_delay,
+        client_make=lambda: BleakClient(settings.ble_address, **kwargs),
+    )
 
 
 def app_create(settings: Settings, source: TemperatureSource, db_open: DbOpen) -> FastAPI:
