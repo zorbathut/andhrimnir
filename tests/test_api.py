@@ -38,17 +38,6 @@ def test_history_is_empty_before_anything_is_recorded(client):
     assert client.get("/api/temperatures/history").json() == []
 
 
-def _rows_insert(db_path: str, count: int, start: datetime) -> None:
-    conn = sqlite3.connect(db_path)
-    with conn:
-        for i in range(count):
-            conn.execute(
-                "INSERT INTO readings (timestamp, probe1) VALUES (?, ?)",
-                ((start + timedelta(seconds=i)).isoformat(), float(i)),
-            )
-    conn.close()
-
-
 def test_websocket_sends_the_current_reading_then_streams(client, source):
     source.current = reading_make(20.0)
     with client.websocket_connect("/ws") as ws:
@@ -94,3 +83,68 @@ async def test_a_closed_client_releases_its_subscription_without_a_reading(sourc
 
     assert source.subscribers == []
     assert sent[-1]["type"] == "websocket.send"  # the initial snapshot still went out
+
+
+def _rows_insert(db_path: str, count: int, start: datetime) -> None:
+    conn = sqlite3.connect(db_path)
+    with conn:
+        for i in range(count):
+            conn.execute(
+                "INSERT INTO readings (timestamp, probe1) VALUES (?, ?)",
+                ((start + timedelta(seconds=i)).isoformat(), float(i)),
+            )
+    conn.close()
+
+
+@pytest.mark.parametrize("probe_num", [0, 7, -1])
+def test_an_out_of_range_probe_is_a_user_error_not_a_silent_success(client, probe_num):
+    """The seeded table only has probes 1-6; an UPDATE outside that range would match nothing and still return 200, so the range has to be rejected at the boundary."""
+    assert client.put(f"/api/probes/names/{probe_num}", json={"name": "Nope"}).status_code == 422
+    assert client.put(f"/api/probes/thresholds/{probe_num}", json={"low": 1.0}).status_code == 422
+
+
+def test_a_malformed_since_is_rejected(client):
+    response = client.get("/api/temperatures/history", params={"since": "banana"})
+    assert response.status_code == 422
+    assert "since" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("limit", [0, -5, 999999])
+def test_an_out_of_range_limit_is_rejected(client, limit):
+    assert client.get("/api/temperatures/history", params={"limit": limit}).status_code == 422
+
+
+def test_history_since_accepts_the_z_suffix_the_frontend_sends(client, db_path):
+    """The browser sends `...Z` while readings are stored with a `+00:00` offset; compared as raw text those disagree, so the endpoint has to normalise."""
+    start = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+    _rows_insert(db_path, 6, start)
+
+    cutoff = (start + timedelta(seconds=3)).isoformat().replace("+00:00", "Z")
+    rows = client.get("/api/temperatures/history", params={"since": cutoff}).json()
+    assert [r["probes"]["1"] for r in rows] == [5.0, 4.0, 3.0]
+
+
+def test_history_since_honours_a_non_utc_offset(client, db_path):
+    """A `+05:00` timestamp names an earlier instant than the same digits in UTC."""
+    start = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+    _rows_insert(db_path, 6, start)
+
+    cutoff = datetime(2026, 8, 30, 17, 0, 3, tzinfo=timezone(timedelta(hours=5))).isoformat()
+    rows = client.get("/api/temperatures/history", params={"since": cutoff}).json()
+    assert [r["probes"]["1"] for r in rows] == [5.0, 4.0, 3.0]
+
+
+def test_history_since_matches_timestamps_the_writer_actually_produces(client, source):
+    """The hand-rolled rows above are whole seconds; db_writer writes microseconds, and a fractional stored timestamp compares differently against a whole-second cutoff."""
+    published = datetime.now(timezone.utc)
+    assert published.microsecond, "this test is meaningless without a fractional timestamp"
+    source.publish(reading_make(21.5, timestamp=published))
+
+    for _ in range(200):
+        if client.get("/api/temperatures/history").json():
+            break
+        time.sleep(0.01)
+
+    cutoff = published.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    rows = client.get("/api/temperatures/history", params={"since": cutoff}).json()
+    assert [r["probes"]["1"] for r in rows] == [21.5]
