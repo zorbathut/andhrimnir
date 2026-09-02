@@ -79,3 +79,22 @@ def test_an_unknown_source_is_rejected(tmp_path, monkeypatch):
     monkeypatch.setenv("ANDHRIMNIR_SOURCE", "carrier-pigeon")
     with pytest.raises(ConfigError, match="carrier-pigeon"):
         Settings.load(tmp_path / "absent.toml")
+
+
+def test_a_malformed_numeric_env_var_names_the_variable(config_path, monkeypatch):
+    monkeypatch.setenv("ANDHRIMNIR_PORT", "not-a-port")
+    with pytest.raises(ConfigError, match="ANDHRIMNIR_PORT"):
+        Settings.load(config_path)
+
+
+def test_a_setting_that_no_longer_exists_is_reported(tmp_path, caplog):
+    """A stale or misspelled key was silently dropped, so a setting could stop taking effect with no sign of it."""
+    import logging
+
+    path = tmp_path / "config.toml"
+    path.write_text('[ble]\naddress = "AA:BB"\nservice_uuid = "dead"\n\n[esp]\nreconnect_delay = 5.0\n')
+    with caplog.at_level(logging.WARNING):
+        Settings.load(path)
+
+    assert "service_uuid" in caplog.text
+    assert "reconnect_delay" in caplog.text

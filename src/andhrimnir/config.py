@@ -1,7 +1,11 @@
+import logging
 import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 SOURCE_KINDS = ("ble", "esp")
 
@@ -38,42 +42,21 @@ class Settings:
         if config_path.exists():
             with open(config_path, "rb") as f:
                 toml = tomllib.load(f)
-            ble = toml.get("ble", {})
-            esp = toml.get("esp", {})
-            server = toml.get("server", {})
-            for toml_key, field in _TOML_BLE.items():
-                if toml_key in ble:
-                    kwargs[field] = ble[toml_key]
-            for toml_key, field in _TOML_ESP.items():
-                if toml_key in esp:
-                    kwargs[field] = esp[toml_key]
-            for toml_key, field in _TOML_SERVER.items():
-                if toml_key in server:
-                    kwargs[field] = server[toml_key]
+            for field in _FIELDS:
+                section = toml.get(field.section, {})
+                if field.key in section:
+                    kwargs[field.name] = section[field.key]
+            _toml_unknown_report(toml, config_path)
 
-        # Env vars override config file
-        if v := os.environ.get("ANDHRIMNIR_BLE_ADDRESS"):
-            kwargs["ble_address"] = v
-        if v := os.environ.get("ANDHRIMNIR_BLE_CHAR_UUID"):
-            kwargs["ble_char_uuid"] = v
-        if v := os.environ.get("ANDHRIMNIR_BLE_RECONNECT_DELAY"):
-            kwargs["ble_reconnect_delay"] = float(v)
-        if v := os.environ.get("ANDHRIMNIR_ESP_HOST"):
-            kwargs["esp_host"] = v
-        if v := os.environ.get("ANDHRIMNIR_ESP_PORT"):
-            kwargs["esp_port"] = int(v)
-        if v := os.environ.get("ANDHRIMNIR_ESP_PASSWORD"):
-            kwargs["esp_password"] = v
-        if v := os.environ.get("ANDHRIMNIR_ESP_NOISE_PSK"):
-            kwargs["esp_noise_psk"] = v
-        if v := os.environ.get("ANDHRIMNIR_HOST"):
-            kwargs["host"] = v
-        if v := os.environ.get("ANDHRIMNIR_PORT"):
-            kwargs["port"] = int(v)
-        if v := os.environ.get("ANDHRIMNIR_DB_PATH"):
-            kwargs["db_path"] = v
-        if v := os.environ.get("ANDHRIMNIR_SOURCE"):
-            kwargs["source"] = v
+        # Env vars override the config file.  An empty value reads as unset, so a setting can be overridden here but never cleared.
+        for field in _FIELDS:
+            value = os.environ.get(field.env)
+            if not value:
+                continue
+            try:
+                kwargs[field.name] = field.parse(value)
+            except ValueError as exc:
+                raise ConfigError(f"{field.env}: {exc}") from exc
 
         # Resolve before construction so Settings.load and Settings(...) agree on the field.
         kwargs["db_path"] = str(Path(kwargs.get("db_path", cls.db_path)).resolve())
@@ -84,22 +67,43 @@ class Settings:
         return settings
 
 
-_TOML_BLE = {
-    "address": "ble_address",
-    "char_uuid": "ble_char_uuid",
-    "reconnect_delay": "ble_reconnect_delay",
-}
+def _toml_unknown_report(toml: dict, config_path: Path) -> None:
+    """Warn about settings that will be ignored, so a stale or misspelled key is not silently dropped."""
+    known: dict[str, set[str]] = {}
+    for field in _FIELDS:
+        known.setdefault(field.section, set()).add(field.key)
+    for section, entries in toml.items():
+        if not isinstance(entries, dict):
+            logger.warning("%s: ignoring top-level key %r; settings must live under a section", config_path, section)
+            continue
+        for key in entries.keys() - known.get(section, set()):
+            logger.warning("%s: ignoring unknown setting [%s] %s", config_path, section, key)
 
-_TOML_ESP = {
-    "host": "esp_host",
-    "port": "esp_port",
-    "password": "esp_password",
-    "noise_psk": "esp_noise_psk",
-}
 
-_TOML_SERVER = {
-    "host": "host",
-    "port": "port",
-    "db_path": "db_path",
-    "source": "source",
-}
+@dataclass(frozen=True, slots=True)
+class _Field:
+    """One Settings field and where it can be read from: `[section] key` in TOML, or an env var."""
+
+    name: str
+    section: str
+    key: str
+    parse: Callable[[str], object] = str
+
+    @property
+    def env(self) -> str:
+        return f"ANDHRIMNIR_{self.name.upper()}"
+
+
+_FIELDS = (
+    _Field("ble_address", "ble", "address"),
+    _Field("ble_char_uuid", "ble", "char_uuid"),
+    _Field("ble_reconnect_delay", "ble", "reconnect_delay", float),
+    _Field("esp_host", "esp", "host"),
+    _Field("esp_port", "esp", "port", int),
+    _Field("esp_password", "esp", "password"),
+    _Field("esp_noise_psk", "esp", "noise_psk"),
+    _Field("host", "server", "host"),
+    _Field("port", "server", "port", int),
+    _Field("db_path", "server", "db_path"),
+    _Field("source", "server", "source"),
+)
