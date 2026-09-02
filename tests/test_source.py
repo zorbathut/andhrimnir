@@ -5,7 +5,7 @@ import pytest
 
 from andhrimnir.source.ble import PROBE_DISCONNECTED, TemperatureSourceBLE, reading_parse
 
-from .fakes import BleakClientFake, packet_make, reading_make, until, until
+from .fakes import BleakClientFake, packet_make, reading_make, until
 
 CHAR_UUID = "0000ffb2-0000-1000-8000-00805f9b34fb"
 

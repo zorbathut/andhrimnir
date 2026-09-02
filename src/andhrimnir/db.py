@@ -17,17 +17,14 @@ MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 async def init_db(db_path: str) -> aiosqlite.Connection:
     conn = await aiosqlite.connect(db_path)
-    await conn.execute(
-        "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)"
-    )
+    await conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)")
     await conn.commit()
 
     cursor = await conn.execute("SELECT MAX(version) FROM schema_version")
     row = await cursor.fetchone()
     current = row[0] or 0
 
-    migration_files = sorted(MIGRATIONS_DIR.glob("[0-9]*.py"))
-    for path in migration_files:
+    for path in sorted(MIGRATIONS_DIR.glob("[0-9]*.py")):
         version = int(path.stem.split("_", 1)[0])
         if version <= current:
             continue
@@ -35,12 +32,10 @@ async def init_db(db_path: str) -> aiosqlite.Connection:
         await module.migrate(conn)
         await conn.execute("INSERT INTO schema_version VALUES (?)", (version,))
         await conn.commit()
+        current = version
         logger.info("Applied migration %04d (%s)", version, path.stem)
 
-    cursor = await conn.execute("SELECT MAX(version) FROM schema_version")
-    row = await cursor.fetchone()
-    logger.info("Database schema version: %d", row[0] or 0)
-
+    logger.info("Database schema version: %d", current)
     return conn
 
 
@@ -56,9 +51,7 @@ async def db_writer(source: TemperatureSource, conn: aiosqlite.Connection) -> No
         source.unsubscribe(queue)
 
 
-async def get_history(
-    conn: aiosqlite.Connection, limit: int = 100, since: str | None = None
-) -> list[dict]:
+async def get_history(conn: aiosqlite.Connection, limit: int, since: str | None) -> list[dict]:
     query = f"SELECT timestamp, {PROBE_COLUMNS} FROM readings"
     params: list = []
     if since:
@@ -84,23 +77,17 @@ async def get_probe_names(conn: aiosqlite.Connection) -> dict[str, str]:
 
 
 async def set_probe_name(conn: aiosqlite.Connection, probe_num: int, name: str) -> None:
-    await conn.execute(
-        "UPDATE probe_names SET name = ? WHERE probe_num = ?", (name, probe_num)
-    )
+    await conn.execute("UPDATE probe_names SET name = ? WHERE probe_num = ?", (name, probe_num))
     await conn.commit()
 
 
 async def get_alert_thresholds(conn: aiosqlite.Connection) -> dict[str, dict]:
-    cursor = await conn.execute(
-        "SELECT probe_num, low_temp_f, high_temp_f FROM alert_thresholds ORDER BY probe_num"
-    )
+    cursor = await conn.execute("SELECT probe_num, low_temp_f, high_temp_f FROM alert_thresholds ORDER BY probe_num")
     rows = await cursor.fetchall()
     return {str(row[0]): {"low": row[1], "high": row[2]} for row in rows}
 
 
-async def set_alert_threshold(
-    conn: aiosqlite.Connection, probe_num: int, low: float | None, high: float | None
-) -> None:
+async def set_alert_threshold(conn: aiosqlite.Connection, probe_num: int, low: float | None, high: float | None) -> None:
     await conn.execute(
         "UPDATE alert_thresholds SET low_temp_f = ?, high_temp_f = ? WHERE probe_num = ?",
         (low, high, probe_num),
