@@ -11,7 +11,7 @@ from andhrimnir.api.websocket import router as ws_router
 from andhrimnir.config import ConfigError, Settings
 from andhrimnir.db import db_writer, init_db
 from andhrimnir.source.base import TemperatureSource
-from andhrimnir.source.ble import BLETemperatureSource
+from andhrimnir.source.ble import TemperatureSourceBLE
 from andhrimnir.source.bleak_esp_proxy import ESPHomeProxyBackend
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
@@ -41,7 +41,7 @@ def source_make(settings: Settings) -> TemperatureSource:
         logger.info("Reading probes over the local BLE radio")
         kwargs = {}
 
-    return BLETemperatureSource(settings, **kwargs)
+    return TemperatureSourceBLE(settings, **kwargs)
 
 
 @asynccontextmanager
