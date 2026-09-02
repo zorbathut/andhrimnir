@@ -71,3 +71,26 @@ def test_websocket_unsubscribes_on_disconnect(client, source):
             break
         time.sleep(0.01)
     assert len(source.subscribers) == baseline
+
+
+async def test_a_closed_client_releases_its_subscription_without_a_reading(source):
+    """The handler used to sit on queue.get() and only notice the client had gone when it next tried to send, so with no readings flowing it held its subscription indefinitely and stalled shutdown.
+
+    Driven over raw ASGI channels rather than TestClient, which force-cancels the handler on exit and so would pass either way.
+    """
+    app = SimpleNamespace(state=SimpleNamespace(source=source))
+    scope = {"type": "websocket", "path": "/ws", "headers": [], "app": app}
+    incoming = asyncio.Queue()
+    incoming.put_nowait({"type": "websocket.connect"})
+    sent = []
+
+    ws = WebSocket(scope, receive=incoming.get, send=lambda message: sent.append(message) or asyncio.sleep(0))
+    handler = asyncio.create_task(websocket_temperatures(ws))
+    await until(lambda: len(source.subscribers) == 1, "the handler to subscribe")
+
+    # Deliberately publish nothing: release must not depend on traffic arriving.
+    incoming.put_nowait({"type": "websocket.disconnect", "code": 1000})
+    await asyncio.wait_for(handler, timeout=1.0)
+
+    assert source.subscribers == []
+    assert sent[-1]["type"] == "websocket.send"  # the initial snapshot still went out
