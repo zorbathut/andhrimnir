@@ -236,7 +236,10 @@
             return c * 9 / 5 + 32;
         }
 
+        var lastReading = null;
+
         function renderProbes(data) {
+            lastReading = data;
             renderLiveTemps(data);
             appendToCharts(data);
             checkAlerts(data);
@@ -547,9 +550,10 @@
                         points.push({ x: new Date(r.timestamp), y: cToF(v) });
                     }
                 }
-                if (points.length === 0) return;
+                var live = lastReading && lastReading.probes[num] !== null;
+                if (points.length === 0 && !live) return;
                 // Insert nulls at gaps > 60s to break the line
-                var gapped = [points[0]];
+                var gapped = points.length ? [points[0]] : [];
                 for (var j = 1; j < points.length; j++) {
                     if (points[j].x - points[j - 1].x > 60000) {
                         gapped.push({ x: new Date(points[j - 1].x.getTime() + 1), y: null });
@@ -632,6 +636,7 @@
                 });
             });
             applyThresholds();
+            chartsBuilt = true;
         }
 
         function fetchHistory() {
@@ -640,7 +645,8 @@
             fetch("/api/temperatures/history?since=" + encodeURIComponent(since) + "&limit=" + limit)
                 .then(function(r) { return r.json(); })
                 .then(buildCharts)
-                .catch(function(e) { console.error("Fetching history failed", e); });
+                .catch(function(e) { console.error("Fetching history failed", e); })
+                .finally(function() { rebuildPending = false; });
         }
 
         // Period button clicks
@@ -654,7 +660,27 @@
         });
 
         // Append live reading to existing charts
+        var rebuildPending = false;
+
+        var chartsBuilt = false;
+
+        function chartMissingForLiveProbe(data) {
+            if (!chartsBuilt) return false;   // the initial build is already on its way
+            for (var num in data.probes) {
+                if (data.probes[num] !== null && !charts[num]) return true;
+            }
+            return false;
+        }
+
         function appendToCharts(data) {
+            // A probe connected after load has no chart yet; rebuild the rows once.
+            if (chartMissingForLiveProbe(data)) {
+                if (!rebuildPending) {
+                    rebuildPending = true;
+                    fetchHistory();
+                }
+                return;
+            }
             var ts = new Date(data.timestamp);
             var cutoff = new Date(Date.now() - selectedHours * 3600000);
             Object.keys(charts).forEach(function(num) {
